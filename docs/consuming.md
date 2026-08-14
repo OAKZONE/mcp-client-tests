@@ -11,7 +11,23 @@ npm install --save-dev github:OAKZONE/mcp-client-tests#vX.Y.Z   # see Releases f
 Pin a **tag**, never a branch. A vendor-behaviour change landing in your CI unannounced is exactly
 what the tag prevents; you bump when you are ready to read what changed.
 
-The package builds itself on install (`prepare`), so no build step of your own is needed.
+**A plain `devDependency` is right.** The repository is public, so it installs with no credentials
+on any machine — including a build server that has none, which is the case that decides this. Reach
+for `optionalDependencies` only if you deliberately want a build to proceed without the gate; the
+cost is that npm continues silently when the package is missing, and you find out at typecheck
+instead of at install.
+
+The package builds itself on install (`prepare`), so no build step of your own is needed: about
+13 s and 47 packages on a cold install.
+
+### If your deploy builds from source
+
+A Coolify/Nixpacks-style deploy builds on its own server and installs devDependencies, because its
+build needs them — so it will install this package too, and pay that ~13 s, even though the deployed
+image never runs a conformance test. Two things that do **not** work if you try to avoid it:
+`npm ci --omit=dev` (the build needs those packages) and `--omit=optional` (it also prunes
+transitive optional native deps such as `sharp` and `lightningcss`). The install cost is the price
+of a source-built deploy; it is small, and it is the same whichever dependency type you choose.
 
 ## 2. Describe your server — `mcp-tests/target.ts`
 

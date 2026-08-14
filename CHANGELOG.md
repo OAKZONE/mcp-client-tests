@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.1 — Consumer guidance corrected: a plain devDependency, not optional
+
+### Fixed
+
+- **Install guidance said `optionalDependencies`; it should say `devDependencies`.** That advice was
+  written while this repository was private, when a build server with no credentials could not fetch
+  it at all and `optional` was what kept a deploy alive. Public removes the reason entirely: it
+  installs with no credentials anywhere, so `optional` rescues nothing and only converts a clear
+  `npm ci` failure into a confusing `Cannot find module` at typecheck. `AGENTS.md` and
+  `docs/consuming.md` now say so, and say when `optional` is still a deliberate choice.
+
+### Added
+
+- `docs/consuming.md` gains a short section for **source-built deploys** (Coolify/Nixpacks and
+  similar): they will install this package even though the deployed image never runs a conformance
+  test, `npm ci --omit=dev` cannot avoid it because the build needs devDependencies, and
+  `--omit=optional` cannot either because it prunes transitive native dependencies such as `sharp`
+  and `lightningcss`. Measured cost: ~13 s and 47 packages.
+
 ## v0.2.0 — Apache-2.0, and contributions are welcome
 
 ### Changed

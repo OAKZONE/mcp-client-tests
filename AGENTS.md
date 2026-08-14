@@ -120,17 +120,17 @@ Keep `LICENSE` and `NOTICE` in `files` so both travel with an install.
 Consumers pin a tag and bump deliberately:
 
 ```
-"optionalDependencies": { "@oakzone/mcp-client-tests": "github:OAKZONE/mcp-client-tests#vX.Y.Z" }
+"devDependencies": { "@oakzone/mcp-client-tests": "github:OAKZONE/mcp-client-tests#vX.Y.Z" }
 ```
 
-**`optionalDependencies`, not `devDependencies`, when the consumer's deploy builds from source.**
-A Coolify/Nixpacks build runs on the deploy server and installs devDependencies (its build needs
-them), so any dependency that fails to fetch there breaks the deploy. Optional makes that
-non-fatal. It costs nothing: this package is public, so it installs anyway — optional is insurance
-against a fetch failure on a path that never needed the tests.
+**`devDependencies`, not `optionalDependencies`.** This package being public is what makes that the
+right answer: it installs with no credentials anywhere, so there is nothing for `optional` to
+rescue, and `optional` would only convert a clear `npm ci` failure into a confusing
+`Cannot find module` at typecheck. Use `optional` only if you deliberately want a build that can
+proceed without the gate.
 
-The trade is that npm will also continue happily when the package is genuinely missing, so a
-consumer's conformance CI job should assert it resolved before running the gate:
+A consumer's conformance CI job is still worth one line of insurance, because the invariant it
+protects is the one everything here rests on:
 
 ```yaml
 - run: node -e "require.resolve('@oakzone/mcp-client-tests/package.json')"
