@@ -47,7 +47,7 @@ Vendor profiles are edited **only when a vendor's documentation changes**, and e
 ## Quickstart
 
 ```bash
-npm install --save-dev github:OAKZONE/mcp-client-tests#v0.1.0
+npm install --save-dev github:OAKZONE/mcp-client-tests#vX.Y.Z   # see Releases for the current tag
 ```
 
 Public and installable with no credentials, which is what lets it work from a build that has none —
@@ -109,5 +109,5 @@ Adding a family never changes an existing one. See **[docs/extending.md](docs/ex
 
 ## Versioning
 
-Consumers pin a tag (`#v0.1.0`) and bump deliberately, so a vendor-behaviour change never lands in a
+Consumers pin a tag and bump deliberately, so a vendor-behaviour change never lands in a
 consumer's CI unannounced. See [AGENTS.md § Versioning](AGENTS.md#versioning).

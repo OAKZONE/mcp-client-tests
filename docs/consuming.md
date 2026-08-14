@@ -5,7 +5,7 @@ Three files in your repository, then one command. Nothing else about your projec
 ## 1. Install and pin
 
 ```bash
-npm install --save-dev github:OAKZONE/mcp-client-tests#v0.1.0
+npm install --save-dev github:OAKZONE/mcp-client-tests#vX.Y.Z   # see Releases for the current tag
 ```
 
 Pin a **tag**, never a branch. A vendor-behaviour change landing in your CI unannounced is exactly

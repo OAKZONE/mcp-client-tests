@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.3 — Install instructions no longer name a fixed tag
+
+### Fixed
+
+- The quickstart and `docs/consuming.md` showed `#v0.1.0`, the most-copied line in the docs and one
+  that goes stale on every release. Both now show `#vX.Y.Z` and point at Releases for the current
+  tag.
+
 ## v0.1.2 — Moved to the OAKZONE organisation
 
 ### Changed

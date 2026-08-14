@@ -1,6 +1,6 @@
 {
   "name": "@oakzone/mcp-client-tests",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Conformance suites for MCP servers, written from the specifications and from what MCP client vendors publish.",
   "private": true,
   "type": "module",
