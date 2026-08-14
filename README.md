@@ -47,7 +47,7 @@ Vendor profiles are edited **only when a vendor's documentation changes**, and e
 ## Quickstart
 
 ```bash
-npm install --save-dev github:wowtah/mcp-client-tests#v0.1.0
+npm install --save-dev github:OAKZONE/mcp-client-tests#v0.1.0
 ```
 
 Public and installable with no credentials, which is what lets it work from a build that has none —

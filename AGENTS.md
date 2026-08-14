@@ -107,7 +107,7 @@ anything that looks like a secret, then commits, tags, and pushes.
 Consumers pin a tag and bump deliberately:
 
 ```
-"optionalDependencies": { "@oakzone/mcp-client-tests": "github:wowtah/mcp-client-tests#vX.Y.Z" }
+"optionalDependencies": { "@oakzone/mcp-client-tests": "github:OAKZONE/mcp-client-tests#vX.Y.Z" }
 ```
 
 **`optionalDependencies`, not `devDependencies`, when the consumer's deploy builds from source.**

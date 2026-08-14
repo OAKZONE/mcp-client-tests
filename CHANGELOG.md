@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.2 — Moved to the OAKZONE organisation
+
+### Changed
+
+- The repository now lives at **[OAKZONE/mcp-client-tests](https://github.com/OAKZONE/mcp-client-tests)**,
+  matching the `@oakzone/` package scope and sitting beside the other shared OAKZONE packages
+  rather than under a personal account. Still public, so it still installs with no credentials.
+- Every install instruction, the `repository` field, and the consumer guidance name the new owner.
+
+**Consumers should re-pin** to `github:OAKZONE/mcp-client-tests#v0.1.2`. GitHub redirects the old
+path, so an existing pin keeps resolving — but a redirect is not a contract, and a lockfile that
+still records the personal account will confuse the next reader.
+
 ## v0.1.1 — Public repository: toolkit material excluded, consumer guidance corrected
 
 ### Fixed
