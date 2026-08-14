@@ -111,3 +111,12 @@ Adding a family never changes an existing one. See **[docs/extending.md](docs/ex
 
 Consumers pin a tag and bump deliberately, so a vendor-behaviour change never lands in a
 consumer's CI unannounced. See [AGENTS.md § Versioning](AGENTS.md#versioning).
+
+## Licence and contributing
+
+[Apache License 2.0](LICENSE). Use it, fork it, ship it — commercially or otherwise. Keep the
+attribution and state your changes; the patent grant and its retaliation clause come with it.
+
+Copyright stays with OAKZONE, and Apache-2.0 §5 puts contributions under the same terms
+automatically, so there is no CLA to sign. See [CONTRIBUTING.md](CONTRIBUTING.md) — it is short, and
+the one rule it carries is the one that makes this package worth running.

@@ -1,6 +1,6 @@
 {
   "name": "@oakzone/mcp-client-tests",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Conformance suites for MCP servers, written from the specifications and from what MCP client vendors publish.",
   "private": true,
   "type": "module",
@@ -23,7 +23,9 @@
     "docs",
     "README.md",
     "CHANGELOG.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=20"
@@ -62,5 +64,5 @@
     "type": "git",
     "url": "git+https://github.com/OAKZONE/mcp-client-tests.git"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

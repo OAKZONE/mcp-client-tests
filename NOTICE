@@ -1,0 +1,10 @@
+@oakzone/mcp-client-tests
+Copyright 2026 OAKZONE
+
+This product includes software developed at OAKZONE (https://github.com/OAKZONE).
+
+The conformance suites in this package are written against publicly published
+specifications (IETF RFCs, the Model Context Protocol specification) and against
+the public client documentation of Anthropic and OpenAI. Those documents are the
+property of their respective publishers and are cited, not reproduced, in
+src/harness/specifications.ts.

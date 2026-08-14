@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.0 — Apache-2.0, and contributions are welcome
+
+### Changed
+
+- **Licensed under [Apache License 2.0](LICENSE)**, replacing the internal-use-only notice inherited
+  from the toolkit scaffold. The package is public and meant to be used: permissive so adoption is
+  not gated on a legal review, with an explicit patent grant because it runs inside other
+  organisations' CI. Copyright remains OAKZONE's.
+- **Contributions are accepted under the same licence automatically** (Apache-2.0 §5) — no CLA. See
+  the new [CONTRIBUTING.md](CONTRIBUTING.md), whose one rule is the one that makes the package worth
+  running: assertions come from the specification, never from a server under test.
+- Added `NOTICE`, and both it and `LICENSE` now ship with an install.
+
+**Released as a minor, not a patch.** A licence change is not an API change, but it is exactly the
+kind of thing a consumer's review needs to see rather than have buried in a patch.
+
 ## v0.1.3 — Install instructions no longer name a fixed tag
 
 ### Fixed

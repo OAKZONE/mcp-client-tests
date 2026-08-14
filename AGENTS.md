@@ -102,6 +102,19 @@ Agents do not run mutating git on their own initiative (TERM07). The release scr
 maintainer invokes it. It validates, refuses on a version/CHANGELOG mismatch, refuses to stage
 anything that looks like a secret, then commits, tags, and pushes.
 
+## Licence
+
+Apache-2.0, and the choice is load-bearing rather than incidental:
+
+- **Permissive**, so a consumer's legal review is a non-event and adoption is not the bottleneck.
+- **§5 licenses inbound contributions under the same terms**, which is how "PRs welcome" and
+  "OAKZONE keeps the rights" hold at once — no CLA to administer.
+- **Explicit patent grant with retaliation**, which matters because this package is embedded in
+  other organisations' CI.
+
+Copyright is OAKZONE's regardless of the licence; the licence governs what everyone else may do.
+Keep `LICENSE` and `NOTICE` in `files` so both travel with an install.
+
 ## Consumers
 
 Consumers pin a tag and bump deliberately:
