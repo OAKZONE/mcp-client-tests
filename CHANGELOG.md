@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.1.1 — Public repository: toolkit material excluded, consumer guidance corrected
+
+### Fixed
+
+- **The agent-toolkit vendor mirrors are gitignored and were removed from history.** `.agents/`,
+  `.claude/`, `.codex/`, `.github/instructions/`, `.github/copilot-instructions.md`, the toolkit's
+  `claude.yml`/`codex.yml` workflows, `setup.sh`, and `.vscode/` all come from the **private**
+  OAKZONE/agent-toolkit and must never be committed to this **public** repository. v0.1.0's tree
+  contained them; the tag was rewritten to a clean tree and force-pushed.
+- **Consumer guidance now recommends `optionalDependencies`**, not `devDependencies`. A
+  Coolify/Nixpacks deploy builds on the deploy server and installs devDependencies, so a dependency
+  that cannot be fetched there breaks the deploy; optional makes it non-fatal. Paired with a
+  `require.resolve` assertion in the consumer's conformance job, so "installed" is never assumed.
+
+### Changed
+
+- `AGENTS.md` is self-contained: a fresh clone has no rule corpus (the toolkit is gitignored), so a
+  contributor or cloud agent without toolkit access works from that file alone.
+
 ## v0.1.0 — First release: OAuth conformance for Claude Desktop, Claude Code, and ChatGPT
 
 Extracted from the Kwantle repository, where these suites were written and where their first run

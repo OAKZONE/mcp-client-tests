@@ -1,9 +1,16 @@
 # mcp-client-tests — AGENTS.md
 
-> Operating rules for this repository. Universal engineering rules are inherited from
-> [@oakzone/agent-toolkit](https://github.com/OAKZONE/agent-toolkit) via the instructions installed
-> under `.claude/rules/` and `.github/instructions/`; run `npm run sync-agents` to materialize them.
-> **Don't duplicate them here** — reference rule IDs (CS13, AFE02, TERM07, MCP05, TUX01 …) instead.
+> Operating rules for this repository.
+>
+> **🔴 This repository is PUBLIC, and the agent-toolkit is not.** Everything
+> `npm run sync-agents` materializes — `.claude/`, `.codex/`, `.github/instructions/`, `.agents/`,
+> `setup.sh` — comes from the private [@oakzone/agent-toolkit](https://github.com/OAKZONE/agent-toolkit)
+> and is **gitignored here**, unlike in the private consumer repos which commit it. Never commit it,
+> and never paste its content into a file that is tracked.
+>
+> The consequence: **a fresh clone has no rule corpus**, and a contributor or cloud agent without
+> toolkit access works from this file alone. So this file is self-contained rather than deferring to
+> rule IDs. A maintainer with access runs `npm run sync-agents` to get the full corpus locally.
 
 ## ⚠️ The rule this repository exists to enforce
 
@@ -100,8 +107,23 @@ anything that looks like a secret, then commits, tags, and pushes.
 Consumers pin a tag and bump deliberately:
 
 ```
-"devDependencies": { "@oakzone/mcp-client-tests": "github:wowtah/mcp-client-tests#vX.Y.Z" }
+"optionalDependencies": { "@oakzone/mcp-client-tests": "github:wowtah/mcp-client-tests#vX.Y.Z" }
 ```
+
+**`optionalDependencies`, not `devDependencies`, when the consumer's deploy builds from source.**
+A Coolify/Nixpacks build runs on the deploy server and installs devDependencies (its build needs
+them), so any dependency that fails to fetch there breaks the deploy. Optional makes that
+non-fatal. It costs nothing: this package is public, so it installs anyway — optional is insurance
+against a fetch failure on a path that never needed the tests.
+
+The trade is that npm will also continue happily when the package is genuinely missing, so a
+consumer's conformance CI job should assert it resolved before running the gate:
+
+```yaml
+- run: node -e "require.resolve('@oakzone/mcp-client-tests/package.json')"
+```
+
+A conformance run that quietly tested nothing is the worst outcome available.
 
 When a release changes vendor facts, the CHANGELOG entry is what a consumer reads before bumping.
 Write it for them, not for us.

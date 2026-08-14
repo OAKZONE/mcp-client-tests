@@ -50,6 +50,10 @@ Vendor profiles are edited **only when a vendor's documentation changes**, and e
 npm install --save-dev github:wowtah/mcp-client-tests#v0.1.0
 ```
 
+Public and installable with no credentials, which is what lets it work from a build that has none —
+a Coolify/Nixpacks deploy builds on its own server, where a private git dependency cannot be fetched
+at all.
+
 Three small files in your repo — a target, a global setup, a test file. See
 **[docs/consuming.md](docs/consuming.md)** for the walkthrough.
 
