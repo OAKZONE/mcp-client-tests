@@ -1,0 +1,66 @@
+# Normalize line endings across platforms so contributors don't get
+# spurious "modified" status on every git diff after a checkout or
+# sync-agents run. Repo stores everything as LF; checkout uses LF too.
+#
+# Without this file, Windows-default `core.autocrlf=true` converts
+# committed-as-LF files to CRLF on checkout, then any LF-emitting
+# tool (Node fs.writeFile, agent-toolkit-sync, prettier, etc.)
+# regenerates them as LF — and git flags them as modified despite
+# zero content change. This file removes that churn entirely.
+
+# Default: treat text files as text, normalize to LF.
+* text=auto eol=lf
+
+# Binary types — never touched.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.svg   text eol=lf
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.mp3   binary
+*.mp4   binary
+*.mov   binary
+*.wav   binary
+
+# Lockfiles and JSON — explicit LF.
+package-lock.json text eol=lf
+*.json            text eol=lf
+
+# Source code — explicit LF.
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.rs   text eol=lf
+*.go   text eol=lf
+*.py   text eol=lf
+*.pyi  text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Prisma schema, TOML — explicit LF.
+*.prisma text eol=lf
+*.toml   text eol=lf
+
+# Shell scripts — LF (POSIX requirement).
+*.sh text eol=lf
+
+# Windows scripts — CRLF (cmd.exe / PowerShell expects it).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

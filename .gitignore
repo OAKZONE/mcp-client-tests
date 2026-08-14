@@ -1,0 +1,26 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+
+# ── Agent-toolkit material is NEVER committed here ───────────────────────────
+# This repository is PUBLIC. Everything `npm run sync-agents` materializes comes
+# from the PRIVATE OAKZONE/agent-toolkit repo and is proprietary, so it stays out
+# of version control — unlike in the private consumer repos, which do commit it.
+#
+# Consequence, so the next agent is not surprised: a fresh clone has no rule
+# corpus until `npm run sync-agents` is run (it needs access to the private
+# toolkit). A cloud agent without that access works from AGENTS.md alone, which
+# is why AGENTS.md here is self-contained rather than deferring to the toolkit.
+.agents/
+.claude/
+.codex/
+.github/instructions/
+.github/copilot-instructions.md
+.github/workflows/claude.yml
+.github/workflows/codex.yml
+.vscode/
+setup.sh
+setup.local.sh

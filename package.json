@@ -1,0 +1,66 @@
+{
+  "name": "@oakzone/mcp-client-tests",
+  "version": "0.1.0",
+  "description": "Conformance suites for MCP servers, written from the specifications and from what MCP client vendors publish.",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./profiles": {
+      "types": "./dist/profiles/index.d.ts",
+      "default": "./dist/profiles/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "validate": "npm run typecheck && npm run lint && npm test && npm run build",
+    "release": "node scripts/release.mjs",
+    "sync-agents": "agent-toolkit-sync",
+    "align-toolkit": "agent-toolkit-sync --align",
+    "upgrade-toolkit": "agent-toolkit-sync --upgrade"
+  },
+  "peerDependencies": {
+    "vitest": ">=3"
+  },
+  "dependencies": {
+    "oauth4webapi": "^3.8.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.4",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "eslint": "^9.39.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  },
+  "optionalDependencies": {
+    "@oakzone/agent-toolkit": "github:OAKZONE/agent-toolkit#v0.63.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wowtah/mcp-client-tests.git"
+  },
+  "license": "UNLICENSED"
+}

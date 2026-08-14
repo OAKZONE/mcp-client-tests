@@ -1,0 +1,107 @@
+# mcp-client-tests — AGENTS.md
+
+> Operating rules for this repository. Universal engineering rules are inherited from
+> [@oakzone/agent-toolkit](https://github.com/OAKZONE/agent-toolkit) via the instructions installed
+> under `.claude/rules/` and `.github/instructions/`; run `npm run sync-agents` to materialize them.
+> **Don't duplicate them here** — reference rule IDs (CS13, AFE02, TERM07, MCP05, TUX01 …) instead.
+
+## ⚠️ The rule this repository exists to enforce
+
+**Assertions come from the specification, never from the server under test.**
+
+Everything else here is machinery in service of that. A suite written to describe what a server
+currently does is green on every defect that server has — which is not a subtle failure mode, it is
+the *only* failure mode that matters. The package's whole value is detecting where an implementation
+and a specification disagree, and it can only do that if the specification is the source.
+
+Three consequences, all binding:
+
+1. **Every expectation cites a clause** in `src/harness/specifications.ts`, and the citation travels
+   into the failure message via `cite()`. An assertion with no citation is an assertion about
+   somebody's implementation.
+2. **A vendor profile is edited only when that vendor's documentation changes**, with
+   `verifiedAgainst` updated in the same commit. Never to make a red test green.
+3. **Only vendor-established facts are asserted.** Where a vendor records a behaviour as unverified,
+   pin the server's behaviour and name the uncertainty in the docstring.
+
+If you find yourself adjusting an assertion because a consumer's server fails it, stop and read the
+citation. That is the moment the suite is doing its job.
+
+## Layout, and what may import what
+
+| Path | Contains | May import |
+|:---|:---|:---|
+| `src/target.ts` | The consumer contract — capabilities, not configuration | nothing |
+| `src/harness/` | Transport, browser, TLS authority, document host, OAuth + MCP clients, deployment lifecycle | Node, `oauth4webapi`, `vitest` |
+| `src/profiles/` | One file per client **surface**, transcribed from vendor docs | `src/harness/` only |
+| `src/suites/` | The families and their suites | all of the above |
+| `src/provision.ts` | Run-start wiring, gated per capability | harness + target |
+
+**Nothing imports a consumer.** That is what makes the package portable and what stops it asserting
+someone's constants back at them.
+
+## Design rules specific to this package
+
+- **MCT01 — A capability describes the SERVER, never the test.** `authorization` is a fact about a
+  deployment; `runOAuthTests` would be a flag, and a flag is how a gate ends up silently skipped in
+  the one repository that most needed it.
+- **MCT02 — One profile per client surface, never per vendor.** See `docs/extending.md`.
+- **MCT03 — Adding a family never edits an existing one.** If it does, the seam is wrong; fix the
+  seam.
+- **MCT04 — Prove the wire, not the handler** (toolkit MCP05). No suite may call a consumer's code
+  directly. Everything crosses a socket.
+- **MCT05 — A harness artefact must never be reportable as a consumer finding.** The package's own
+  tests (`src/harness/harness.test.ts`) exist for exactly this: a defect in `wellKnownInsertion` or
+  `parseBearerChallenge` would make every consumer's suite assert the wrong thing quietly. When a new
+  pure unit is added to the harness, it gets a test here.
+
+## QA gates
+
+| Scope | Gates |
+|:---|:---|
+| Docs only | none — state "QA skipped — documentation-only" |
+| Any source change | `npm run validate` (typecheck + lint + tests + build) |
+| A profile or a suite | `npm run validate`, **plus** run the suites against a real consumer before release |
+
+The last row is not optional. This package's own tests cover its pure units; they cannot tell you a
+suite still passes against a real server. Before tagging, run the gate in a consuming repository.
+
+## Versioning
+
+SemVer against the **consumer contract and the assertions**, which is not the same as source shape:
+
+- **Patch** — a fix that does not change what any assertion means; docs; internal refactor.
+- **Minor** — new suites, new profiles, new capabilities, new exports. **A consumer's green run may
+  turn red**, because a new assertion can surface a pre-existing defect. That is the intended
+  behaviour of this package, and the CHANGELOG must say what was added so the consumer can read the
+  finding rather than debug a mystery.
+- **Major** — a breaking change to `McpTestTarget` or to an exported entry point.
+
+**A vendor-behaviour correction is at least a minor**, even when the diff is one line, because it
+changes what a consumer's passing test asserted yesterday.
+
+## Release flow
+
+Same shape as the toolkit's, and the same three things must move together — `package.json` version,
+a `CHANGELOG.md` heading, and the tag:
+
+1. Land the work; `npm run validate` green; the gate run against a real consumer.
+2. Bump `version` in `package.json`.
+3. Add a CHANGELOG entry at the **top** under `## vX.Y.Z — <one-line summary>`. That summary becomes
+   the commit and tag message, so write it as you would want to read it in `git log`.
+4. **Maintainer-only:** `npm run release -- vX.Y.Z` (add `--dry-run` first to see the plan).
+
+Agents do not run mutating git on their own initiative (TERM07). The release script does it once a
+maintainer invokes it. It validates, refuses on a version/CHANGELOG mismatch, refuses to stage
+anything that looks like a secret, then commits, tags, and pushes.
+
+## Consumers
+
+Consumers pin a tag and bump deliberately:
+
+```
+"devDependencies": { "@oakzone/mcp-client-tests": "github:wowtah/mcp-client-tests#vX.Y.Z" }
+```
+
+When a release changes vendor facts, the CHANGELOG entry is what a consumer reads before bumping.
+Write it for them, not for us.
