@@ -181,6 +181,34 @@ export function openOAuthSession(
   };
 }
 
+/**
+ * The `name` a consent screen's permission checkboxes carry when its target does not say.
+ *
+ * A default rather than a required field because every consumer written before the setting existed
+ * used this name, and a required field would have turned a portability improvement into a breaking
+ * change for all of them.
+ */
+export const DEFAULT_CONSENT_SCOPE_FIELD = "scope";
+
+/**
+ * The consent-screen facts a browser leg needs, read off a target's authorization capability.
+ *
+ * Spread into a leg's options (`...consentControls(authorization)`) so a new consent-screen fact is
+ * added in one place rather than at every call site that drives a browser.
+ *
+ * @param authorization - The target's authorization capability.
+ * @returns The consent form's id and the name of its permission controls.
+ */
+export function consentControls(authorization: {
+  readonly consentFormId: string;
+  readonly consentScopeFieldName?: string;
+}): { consentFormId: string; consentScopeFieldName: string } {
+  return {
+    consentFormId: authorization.consentFormId,
+    consentScopeFieldName: authorization.consentScopeFieldName ?? DEFAULT_CONSENT_SCOPE_FIELD,
+  };
+}
+
 /** What the browser leg produced. */
 export interface AuthorizationLeg {
   /** The URL the browser was finally redirected to at the client's callback. */
@@ -203,6 +231,8 @@ export interface AuthorizationLegOptions {
   readonly sessionCookieName: string;
   readonly sessionCookieValue: string;
   readonly consentFormId: string;
+  /** The `name` the consent screen's permission checkboxes carry. Defaults to `scope`. */
+  readonly consentScopeFieldName?: string;
   /** Extra permissions the holder ticks beyond what the client asked for. */
   readonly additionalScopes?: readonly string[];
   /** `allow` completes the authorization; `deny` refuses it. */
@@ -257,8 +287,9 @@ export async function runAuthorizationLeg(
     );
   }
 
+  const scopeField = options.consentScopeFieldName ?? DEFAULT_CONSENT_SCOPE_FIELD;
   const offeredScopes = form.checkboxes
-    .filter((control) => control.name === "scope")
+    .filter((control) => control.name === scopeField)
     .map((control) => ({
       value: control.value,
       checked: control.checked,
@@ -273,7 +304,7 @@ export async function runAuthorizationLeg(
     .map((control) => [control.name, control.value] as const);
   for (const extra of options.additionalScopes ?? []) {
     if (!submitted.some(([, value]) => value === extra)) {
-      submitted.push(["scope", extra]);
+      submitted.push([scopeField, extra]);
     }
   }
   submitted.push(["decision", options.decision ?? "allow"]);
@@ -328,6 +359,7 @@ export interface CompleteAuthorizationOptions {
   readonly sessionCookieName: string;
   readonly sessionCookieValue: string;
   readonly consentFormId: string;
+  readonly consentScopeFieldName?: string;
   readonly additionalScopes?: readonly string[];
   readonly browser?: Browser;
   /** Extra authorization-request parameters; see `buildAuthorizationRequest`. */
@@ -363,6 +395,7 @@ export async function completeAuthorization(
     sessionCookieName: options.sessionCookieName,
     sessionCookieValue: options.sessionCookieValue,
     consentFormId: options.consentFormId,
+    consentScopeFieldName: options.consentScopeFieldName,
     additionalScopes: options.additionalScopes,
     browser: options.browser,
   });

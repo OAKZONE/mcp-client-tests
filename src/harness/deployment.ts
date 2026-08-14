@@ -16,10 +16,13 @@
  * nothing a suite does can silently depend on being alone.
  *
  * **The handoff.** Test runners execute global setup in a main process and suites in workers, so
- * the facts are written to a temp file keyed on the process id and the target id.
+ * the facts are written to a temp file keyed on the target id and a per-run id — never on a process
+ * id, which differs between the writer and the reader under a forking pool. See
+ * {@link conformanceRunId}.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -42,9 +45,42 @@ export interface RunningDeployment {
   readonly logPath: string;
 }
 
+/**
+ * The variable that ties one run's handoff files to the process tree that owns them.
+ *
+ * 🔴 It cannot be `process.pid`. The handoff is written by the **main** runner process during global
+ * setup and read inside a **test worker**, and under Vitest's default `forks` pool a worker is a
+ * separate process with its own pid — so a pid-keyed path resolves to two different files and every
+ * suite fails with "no deployment was provisioned" while the deployment is running perfectly. That
+ * reads exactly like a broken consumer setup, which is the class of harness artefact this package
+ * must never produce (`AGENTS.md` MCT05).
+ *
+ * An environment variable is what both sides can see: global setup runs before any worker is
+ * spawned, and both pools give a worker a copy of the parent's environment. Two concurrent runs on
+ * one machine get different ids and therefore different files.
+ */
+const RUN_ID_VARIABLE = "MCP_CLIENT_TESTS_RUN_ID";
+
+/**
+ * Claim (or re-read) this run's id.
+ *
+ * Idempotent: the main process claims one during provisioning, and every later caller — including
+ * every worker — reads that same value back out of the environment.
+ *
+ * @returns The run id.
+ */
+export function conformanceRunId(): string {
+  let runId = process.env[RUN_ID_VARIABLE];
+  if (!runId) {
+    runId = `${process.pid}-${randomBytes(4).toString("hex")}`;
+    process.env[RUN_ID_VARIABLE] = runId;
+  }
+  return runId;
+}
+
 /** The temp file the main process writes and the workers read. */
 export function deploymentHandoffPath(targetId: string): string {
-  return path.join(tmpdir(), `mcp-client-tests-${targetId}-${process.pid}.json`);
+  return path.join(tmpdir(), `mcp-client-tests-${targetId}-${conformanceRunId()}.json`);
 }
 
 /**

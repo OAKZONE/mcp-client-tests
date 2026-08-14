@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.3.0 — Runs under a forking pool, and adapts to a consent screen's own control names
+
+Second consumer (Stageify) — and adopting it surfaced two package defects, both of the exact class
+`AGENTS.md` MCT05 exists to prevent: a harness artefact that reads as a finding about somebody's
+server. **If you are on v0.2.1 and your suites never ran, this is why.**
+
+### Fixed
+
+- **🔴 The deployment handoff was keyed on `process.pid`, so every suite failed under Vitest's
+  default `forks` pool.** Global setup writes the handoff in the *main* runner process and a suite
+  reads it in a *worker*, which under `forks` is a different process with a different pid — so the
+  two resolved to different files and every suite threw *"No deployment was provisioned for target
+  X"* while the deployment was running perfectly. The run is now keyed on a per-run id carried in
+  the environment, which both processes see under either pool. A consumer whose runner uses
+  `threads` never saw this; one whose runner uses `forks` saw nothing else.
+- **A test that failed after the run started could leave the pooled connection unhandled.** Not a
+  package change — see the consuming note below — but `docs/consuming.md` now says why a target's
+  database client must not disconnect between suites, because doing so ends a worker with
+  *"Worker exited unexpectedly"* and no failing test to attribute it to.
+
+### Added
+
+- **`AuthorizationCapability.consentScopeFieldName`** — the `name` a consent screen's permission
+  checkboxes carry, defaulting to `scope`. Like `consentFormId` this is application UI, not
+  protocol: nothing in any specification names the control a consent screen collects capabilities
+  in, and a deployment whose decision route reads `selectedScopes` is exactly as conformant as one
+  reading `scope`. The package models a real browser, which submits the control's declared name and
+  nothing else, so it has to be told which one to read — and which one to add an extra permission
+  to when a suite exercises granting more than was asked.
+- `consentControls(authorization)` is exported for suite authors: spread it into a browser leg so a
+  new consent-screen fact is added in one place rather than at every call site.
+
+### Consumers
+
+**No action needed on an existing target** — `consentScopeFieldName` defaults to the name every
+consumer written before it used. Bump for the handoff fix if your runner forks, which is Vitest's
+default.
+
 ## v0.2.1 — Consumer guidance corrected: a plain devDependency, not optional
 
 ### Fixed

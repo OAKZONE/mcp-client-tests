@@ -67,6 +67,7 @@ export const target: McpTestTarget = {
   // Optional. Supply it and the OAuth conformance family runs; omit it and it skips.
   authorization: {
     consentFormId: "consent-approve",
+    consentScopeFieldName: "scope", // optional; the name your permission checkboxes carry
     accessTokenSeconds: 5, // optional; unlocks the expiry → refresh → retry path
     async createAccountHolder(suiteId) { /* … */ },
     async clearAccountHolders(suiteId) { /* … */ },
@@ -85,6 +86,18 @@ from that page's own `Referrer-Policy`. If you stub the session, you are testing
 **Namespace by `suiteId`.** Suites share one deployment, so a cleanup keyed on something they all
 share deletes a sibling's signed-in holder — which surfaces as every consent screen redirecting to
 your login page, a failure that reads exactly like a broken deployment.
+
+**Name your consent controls if they are not called `scope`.** The package models a real browser: it
+submits the checkbox `name` your page declares and nothing else. If your decision route reads
+`selectedScopes`, set `consentScopeFieldName` to match, or every consent submits an empty capability
+set. Nothing in any specification names this control — your server is not wrong, the package just
+cannot guess.
+
+**Do not disconnect your database client between suites.** They share one worker, so tearing the
+pool down when one finishes takes it out from under the next; worse, an idle client erroring on a
+pool with no `error` listener ends the worker process outright — which Vitest reports as *"Worker
+exited unexpectedly"*, with no failing test and nothing in your server's log. Open it lazily, add a
+no-op `pool.on("error")`, and release it from the capability's `close()`.
 
 ## 3. Start it once — `mcp-tests/global-setup.ts`
 

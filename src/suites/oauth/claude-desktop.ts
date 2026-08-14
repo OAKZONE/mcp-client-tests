@@ -27,6 +27,7 @@ import { connectDocumentHost, type DocumentPublisher } from "../../harness/docum
 import type { EdgeTarget } from "../../harness/edge-transport.js";
 import {
   assertDeploymentIsServing,
+  consentControls,
   completeAuthorization,
   discoverDeployment,
   openOAuthSession,
@@ -126,7 +127,7 @@ describe.skipIf(!mcpTarget.authorization)(
             : selectedScope(profile, discovered),
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
         additionalScopes: overrides.additionalScopes,
         extraParameters: overrides.extraParameters,
       });
@@ -373,7 +374,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
         });
 
         expect(
@@ -399,7 +400,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
         });
 
         expect(
@@ -425,7 +426,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
         });
 
         expect(
@@ -472,7 +473,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
         });
 
         const requested = (scope ?? "").split(" ").filter(Boolean);
@@ -511,7 +512,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
           decision: "deny",
         });
 
@@ -671,7 +672,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
         });
         const parameters = validateAuthorizationResponse(
           session,
@@ -709,7 +710,7 @@ describe.skipIf(!mcpTarget.authorization)(
           authorizationUrl: pending.url,
           sessionCookieName: holder.sessionCookieName,
           sessionCookieValue: holder.sessionCookieValue,
-          consentFormId: authorization.consentFormId,
+          ...consentControls(authorization),
         });
         const parameters = validateAuthorizationResponse(
           session,

@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 
 import { findForm, browserOriginFor } from "./browser.js";
+import { consentControls } from "./flow.js";
 import { parseBearerChallenge } from "./mcp-client.js";
 import { createLoopbackTlsMaterial } from "./tls-certificate.js";
 import { wellKnownInsertion } from "./vendor-profile.js";
@@ -147,6 +148,23 @@ describe("findForm", () => {
     // What the server rendered INSTEAD is the diagnosis; "the form is missing" never is.
     expect(() => findForm("<html><head><title>Sign-in error</title></head></html>", "approve"))
       .toThrow(/Sign-in error/);
+  });
+});
+
+describe("consentControls", () => {
+  it("defaults the checkbox name to `scope`", () => {
+    expect(consentControls({ consentFormId: "approve" })).toEqual({
+      consentFormId: "approve",
+      consentScopeFieldName: "scope",
+    });
+  });
+
+  it("carries the deployment's own control name when it declares one", () => {
+    // A deployment whose decision route reads `selectedScopes` is exactly as conformant as one
+    // reading `scope`; nothing in any specification names this control.
+    expect(
+      consentControls({ consentFormId: "approve", consentScopeFieldName: "selectedScopes" }),
+    ).toEqual({ consentFormId: "approve", consentScopeFieldName: "selectedScopes" });
   });
 });
 

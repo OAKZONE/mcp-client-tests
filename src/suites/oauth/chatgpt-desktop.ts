@@ -32,6 +32,7 @@ import { connectDocumentHost, type DocumentPublisher } from "../../harness/docum
 import type { EdgeTarget } from "../../harness/edge-transport.js";
 import {
   assertDeploymentIsServing,
+  consentControls,
   completeAuthorization,
   discoverDeployment,
   openOAuthSession,
@@ -219,7 +220,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
         scope: withOidc,
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
       });
 
       expect(
@@ -244,7 +245,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
         scope: selectedScope(profile, discovered),
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
       });
 
       expect(
@@ -322,7 +323,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
         scope: selectedScope(profile, discovered),
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
       });
 
       expect(
@@ -348,7 +349,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
         scope: selectedScope(profile, discovered),
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
       });
       const exchange = await mcpRequest(target, serverUrl, initializeMessage(), {
         accessToken: completed.tokens.access_token,
@@ -410,7 +411,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
         scope: selectedScope(profile, discovered),
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
       });
       const listed = await mcpRequest(target, serverUrl, listToolsMessage(), {
         accessToken: completed.tokens.access_token,
@@ -499,7 +500,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
         scope: selectedScope(profile, discovered),
         sessionCookieName: holder.sessionCookieName,
         sessionCookieValue: holder.sessionCookieValue,
-        consentFormId: authorization.consentFormId,
+        ...consentControls(authorization),
       });
       const listed = await mcpRequest(target, serverUrl, listToolsMessage(), {
         accessToken: completed.tokens.access_token,

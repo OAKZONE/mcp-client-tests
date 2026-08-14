@@ -120,6 +120,19 @@ export interface AuthorizationCapability {
   readonly consentFormId: string;
 
   /**
+   * The `name` the consent screen's permission checkboxes carry.
+   *
+   * Like {@link consentFormId}, this is application UI rather than protocol: nothing in any
+   * specification names the control a consent screen collects its capabilities in, and a deployment
+   * whose decision route reads `selectedScopes` is exactly as conformant as one reading `scope`.
+   * The package models a real browser, which submits the control's declared name and nothing else,
+   * so it has to be told which one to read and which one to add an extra permission to.
+   *
+   * Defaults to `scope`.
+   */
+  readonly consentScopeFieldName?: string;
+
+  /**
    * The access-token lifetime the deployment was started with, in seconds.
    *
    * Declaring it unlocks the expiry path — "the token expires, the client refreshes, the retry
