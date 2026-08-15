@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.4.0 — Two refusals the suites exercised but never actually pinned
+
+Both come from auditing two consumers' own OAuth tests for anything generic enough to belong here.
+Almost everything worth keeping was already covered — these two were not, and both are the kind of
+defect that is invisible until a real client hits it.
+
+### Added
+
+- **A too-narrow credential must draw `403`, not `401`.** The insufficient-scope test previously
+  *searched* for a `403` and asserted its shape; a server answering `401` was never examined, so it
+  passed by producing nothing to look at. It now accepts either status and pins `403`. RFC 6750 §3.1
+  reserves `401`/`invalid_token` for a credential that could not be *verified*: a client meeting
+  `401` re-authenticates, so a server answering it here sends the client through a full
+  authorization that mints the same too-narrow token — forever, with no error anyone can see.
+- **A revoked credential must be indistinguishable from one that never existed.** Every other
+  assertion exercises one refusal and checks its shape; this is the only one that compares two, and
+  the property is invisible any other way. A distinguishable refusal is an oracle answering "did
+  this token ever exist?" and "is that holder still authorized?" for anyone willing to ask. RFC 6750
+  §3.1 gives the whole class one code so a server has nothing finer to leak.
+
+### Consumers
+
+Both may turn a green run red, which is the point — neither was ever asserted before. If the second
+one fails, the fix is in the refusal path, not in the test: make every unverifiable credential
+answer identically and log the real cause server-side.
+
 ## v0.3.0 — Runs under a forking pool, and adapts to a consent screen's own control names
 
 Second consumer (Stageify) — and adopting it surfaced two package defects, both of the exact class

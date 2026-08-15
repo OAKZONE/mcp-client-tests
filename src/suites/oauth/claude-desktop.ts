@@ -816,6 +816,9 @@ describe.skipIf(!mcpTarget.authorization)(
           readonly name: string;
         }[];
 
+        // Any authorization refusal, not only a `403` — because WHICH status a too-narrow
+        // credential draws is the first half of what is under test. Looking only for `403` would
+        // let a server that answers `401` here pass by never being examined at all.
         let refusal: Awaited<ReturnType<typeof mcpRequest>> | undefined;
         for (const tool of tools) {
           const attempt = await mcpRequest(
@@ -824,7 +827,7 @@ describe.skipIf(!mcpTarget.authorization)(
             callToolMessage(tool.name),
             { accessToken: completed.tokens.access_token },
           );
-          if (attempt.http.status === 403) {
+          if (attempt.http.status === 401 || attempt.http.status === 403) {
             refusal = attempt;
             break;
           }
@@ -836,6 +839,19 @@ describe.skipIf(!mcpTarget.authorization)(
           expect(tools.length).toBeGreaterThan(0);
           return;
         }
+
+        expect(
+          refusal.http.status,
+          cite(
+            IETF.BEARER_CHALLENGE,
+            "A credential that is VALID but lacks a permission is `403`, not `401`. RFC 6750 §3.1 " +
+              "reserves `401`/`invalid_token` for a credential that could not be verified, and " +
+              "every covered client acts on the difference: a `401` means re-authenticate, so a " +
+              "server answering `401` here sends the client back through a full authorization " +
+              "that mints the same too-narrow token, forever. `403` + `insufficient_scope` is the " +
+              "only shape that triggers a scope step-up.",
+          ),
+        ).toBe(403);
 
         const challenge = parseBearerChallenge(
           refusal.http.headers.get("www-authenticate"),
@@ -1026,6 +1042,53 @@ describe.skipIf(!mcpTarget.authorization)(
               "than at the next expiry. Caching 'this session is allowed' defeats revocation.",
           ),
         ).toBe(401);
+      });
+
+      it("describes a revoked credential exactly as it describes an unknown one", async () => {
+        // Every other assertion here exercises ONE refusal and checks its shape. This is the only
+        // one that puts two side by side, and the property is only visible that way: a caller must
+        // not be able to tell a revoked grant from a credential that never existed.
+        //
+        // The reason is not tidiness. A distinguishable refusal is an oracle — it answers "did this
+        // token ever exist?" and "is this holder still authorized?" for anybody willing to ask, and
+        // both answers are about somebody else's account. RFC 6750 §3.1 gives one code for the
+        // whole class precisely so a server has nothing finer to leak; the cause belongs in the
+        // server's own log, where the operator can read it and the caller cannot.
+        const completed = await authorize();
+        await revokeToken(target, session, completed.tokens.refresh_token!, "refresh_token");
+
+        const revoked = await mcpRequest(target, serverUrl, initializeMessage(), {
+          accessToken: completed.tokens.access_token,
+        });
+        const neverIssued = await mcpRequest(target, serverUrl, initializeMessage(), {
+          accessToken: "not-a-token-this-server-ever-minted",
+        });
+
+        expect(
+          neverIssued.http.status,
+          cite(
+            IETF.BEARER_CHALLENGE,
+            "An unverifiable credential is `401`, whatever made it unverifiable.",
+          ),
+        ).toBe(revoked.http.status);
+
+        const errorOf = (
+          response: Awaited<ReturnType<typeof mcpRequest>>,
+        ): string | undefined =>
+          parseBearerChallenge(response.http.headers.get("www-authenticate"))?.parameters.get(
+            "error",
+          );
+
+        expect(
+          errorOf(neverIssued),
+          cite(
+            IETF.BEARER_CHALLENGE,
+            "RFC 6750 §3.1 defines ONE code — `invalid_token` — for a credential that is expired, " +
+              "revoked, malformed, or simply unknown. Answering a revoked credential differently " +
+              "from an unknown one turns the endpoint into an oracle for whether a given token " +
+              "ever existed and whether its holder is still authorized.",
+          ),
+        ).toBe(errorOf(revoked));
       });
 
       it("lets the same client identity reconnect after a disconnect", async () => {
