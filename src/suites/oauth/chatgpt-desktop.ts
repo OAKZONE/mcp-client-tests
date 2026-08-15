@@ -49,6 +49,8 @@ import {
 } from "../../harness/mcp-client.js";
 import {
   fetchDocument,
+  readRefreshResponse,
+  refreshTokens,
   registerDynamicClient,
   registerDynamicClientRaw,
   type OAuthSession,
@@ -364,6 +366,48 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
             "and the MCP server accepts it.",
         ),
       ).toBe(200);
+    });
+  });
+
+  describe("staying connected", () => {
+    it("receives and can use a refresh token without requesting offline_access", async () => {
+      const scope = selectedScope(profile, discovered)
+        ?.split(" ")
+        .filter((entry) => entry !== "offline_access")
+        .join(" ");
+
+      const completed = await completeAuthorization({
+        target,
+        profile,
+        discovered,
+        session,
+        resource: String(discovered.protectedResource.resource),
+        scope,
+        sessionCookieName: holder.sessionCookieName,
+        sessionCookieValue: holder.sessionCookieValue,
+        ...consentControls(authorization),
+      });
+      expect(
+        completed.tokens.refresh_token,
+        cite(
+          IETF.OAUTH2_TOKEN_RESPONSE,
+          "ChatGPT registers the refresh_token grant but does not reliably request the OIDC-only " +
+            "offline_access scope. A server that withholds the refresh token leaves the desktop " +
+            "connection stranded as soon as its access token expires.",
+        ),
+      ).toBeTypeOf("string");
+
+      const refreshed = await readRefreshResponse(
+        session,
+        await refreshTokens(target, session, completed.tokens.refresh_token!),
+      );
+      expect(
+        refreshed.access_token,
+        cite(
+          IETF.OAUTH2_TOKEN_RESPONSE,
+          "A refresh-token grant must produce a replacement access token the client can store.",
+        ),
+      ).toBeTypeOf("string");
     });
   });
 

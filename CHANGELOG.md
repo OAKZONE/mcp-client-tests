@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.5.0 — ChatGPT connections survive access-token expiry
+
+ChatGPT Desktop registers the `refresh_token` grant but, unlike the model the previous profile
+used, does not reliably append the OpenID Connect-only `offline_access` scope. An OAuth server that
+inherits an OIDC provider's default refresh policy therefore returns only an access token. The
+connection looks healthy until that token expires — commonly one hour later — and then ChatGPT asks
+the user to reconnect.
+
+### Changed
+
+- The ChatGPT profile now reflects the observed desktop connector request and does not synthesize
+  `offline_access` from authorization-server metadata.
+- The ChatGPT suite now completes an authorization without `offline_access`, requires a refresh
+  token, and exchanges it for a replacement access token over the real wire. This may turn a green
+  consumer red when its OAuth server incorrectly couples refresh issuance to an OIDC scope instead
+  of the client's registered OAuth grant.
+
+### Consumers
+
+If the new assertion fails, keep the client's capability check: issue a refresh token only when the
+client registered `refresh_token`. Remove only the dependency on `offline_access`; do not issue
+refresh credentials to clients that did not register the grant.
+
 ## v0.4.0 — Two refusals the suites exercised but never actually pinned
 
 Both come from auditing two consumers' own OAuth tests for anything generic enough to belong here.

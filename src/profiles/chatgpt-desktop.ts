@@ -16,9 +16,8 @@
  * - **A three-URL authorization-server discovery order**, which differs from Claude's two.
  *
  * **What is deliberately not asserted.** OpenAI does not document how ChatGPT merges its scope
- * sources, whether every surface requests `offline_access`, or its step-up retry bound. Those are
- * recorded as unverified rather than guessed; the suite pins this deployment's behaviour there and
- * says so in the test's own docstring.
+ * sources or its step-up retry bound. Those are recorded as unverified rather than guessed; the
+ * suite pins this deployment's behaviour there and says so in the test's own docstring.
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -95,7 +94,8 @@ export function chatgptDesktopProfile(
     id: "chatgpt-desktop",
     displayName: "ChatGPT (Developer mode / published plugin)",
     documentation: VENDOR.OPENAI_PLUGIN_AUTH,
-    verifiedAgainst: "OpenAI Plugins documentation, read 2026-08-14",
+    verifiedAgainst:
+      "OpenAI Plugins documentation plus live ChatGPT Desktop connector, verified 2026-08-15",
 
     // ChatGPT supports CIMD, DCR, and pre-registration, and the plugin builder can select DCR even
     // when CIMD is available — so a deployment advertising both must keep both paths working. This
@@ -116,11 +116,10 @@ export function chatgptDesktopProfile(
     sendsResourceParameter: true,
     sendsStateParameter: true,
 
-    // Unverified for ChatGPT: OpenAI does not document whether every surface requests
-    // `offline_access`. Modelled as appending it when the authorization server advertises it —
-    // which is what a conformant client does with an advertised scope it wants — and any test that
-    // depends on the difference says so.
-    appendsOfflineAccessFromAuthorizationServerMetadata: true,
+    // Observed on the live desktop connector: ChatGPT registers the refresh-token grant but does
+    // not append `offline_access` from authorization-server metadata. Servers that inherit an
+    // OIDC-only issuance policy consequently strand the connection when the access token expires.
+    appendsOfflineAccessFromAuthorizationServerMetadata: false,
 
     /**
      * ChatGPT's baseline comes from the transport challenge's `scope`, falling back to the
@@ -128,20 +127,14 @@ export function chatgptDesktopProfile(
      * the OIDC scopes it requests when discovery advertises them.
      *
      * **The merge algorithm is not documented**, and OpenAI says explicitly not to invent a
-     * precedence rule — so this models only the two rungs that are documented and stated, and adds
-     * `offline_access` on the same basis as the vendor-neutral ladder. Tests that would depend on
-     * the undocumented part assert this deployment's behaviour and name the uncertainty.
+     * precedence rule — so this models only the two rungs that are documented and stated. Tests
+     * that would depend on the undocumented part assert this deployment's behaviour and name the
+     * uncertainty.
      */
     selectScope(inputs) {
       const base = inputs.challengeScope
         ? inputs.challengeScope.split(" ").filter(Boolean)
         : [...inputs.protectedResourceScopes];
-      if (
-        inputs.authorizationServerScopes.includes("offline_access") &&
-        !base.includes("offline_access")
-      ) {
-        base.push("offline_access");
-      }
       return base.length > 0 ? base.join(" ") : undefined;
     },
 
