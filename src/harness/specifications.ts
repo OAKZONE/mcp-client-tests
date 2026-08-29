@@ -38,7 +38,18 @@ function clause(
 const RFC = "https://www.rfc-editor.org/rfc";
 const MCP_AUTHZ =
   "https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization";
+const MCP_STATELESS = "https://modelcontextprotocol.io/specification/2026-07-28";
+
+/** When the 2025-11-25-era sources below were last read against the live document. */
 const READ = "2026-08-14";
+
+/**
+ * When the `2026-07-28` revision's sources were last read.
+ *
+ * A separate stamp because these clauses arrived with the revision that shipped on 2026-07-28 and
+ * were read later than the rest; a single date would have back-dated them or aged the others.
+ */
+const READ_STATELESS = "2026-08-29";
 
 /**
  * IETF clauses. These bind every OAuth client, so an assertion citing one of these belongs in the
@@ -203,7 +214,15 @@ export const IETF = Object.freeze({
   ),
 });
 
-/** Model Context Protocol authorization, revision 2025-11-25. */
+/**
+ * Model Context Protocol clauses: authorization on revision `2025-11-25`, and the stateless
+ * `2026-07-28` revision that replaced the handshake and the session.
+ *
+ * **Both revisions are live.** `2026-07-28` deprecates rather than deletes, on a twelve-month floor,
+ * and the clients differ on which they speak — one probes for the newer revision and uses it where
+ * it is offered, four are unverified. A server is therefore expected to serve both, and an
+ * assertion here names the revision it comes from so a red test cannot be read as the wrong one.
+ */
 export const MCP = Object.freeze({
   /** An unauthenticated MCP request is refused with HTTP 401 plus a Bearer challenge. */
   UNAUTHENTICATED_401: clause(
@@ -246,6 +265,111 @@ export const MCP = Object.freeze({
     "MCP 2025-11-25 — Server Tools",
     "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
     READ,
+  ),
+
+  // ---------------------------------------------------------------------------------------------
+  // Revision 2026-07-28 — the stateless revision.
+  //
+  // Mostly subtractive, which is the dangerous kind: a server built on the removed assumptions
+  // keeps passing its own tests while the ground moves. Deprecations run on a twelve-month floor,
+  // so both revisions are live and a server is expected to serve both.
+  // ---------------------------------------------------------------------------------------------
+
+  /** No `initialize` handshake and no `Mcp-Session-Id`: each request carries its own `_meta`. */
+  STATELESS_REVISION: clause(
+    "MCP 2026-07-28 — Changelog (no handshake, no session, per-request `_meta`)",
+    `${MCP_STATELESS}/changelog`,
+    READ_STATELESS,
+  ),
+  /** `server/discover` is mandatory: supported revisions, capabilities, and server identity. */
+  SERVER_DISCOVER: clause(
+    "MCP 2026-07-28 — Changelog (`server/discover` is mandatory)",
+    `${MCP_STATELESS}/changelog`,
+    READ_STATELESS,
+  ),
+  /** List results MUST NOT vary per connection; they MAY vary by the authorization presented. */
+  LIST_CONNECTION_INVARIANT: clause(
+    "MCP 2026-07-28 — Changelog (list results must not vary per connection)",
+    `${MCP_STATELESS}/changelog`,
+    READ_STATELESS,
+  ),
+  /** Every result carries `resultType` — `complete`, or `input_required`. */
+  RESULT_TYPE: clause(
+    "MCP 2026-07-28 — Changelog (`resultType` on every result)",
+    `${MCP_STATELESS}/changelog`,
+    READ_STATELESS,
+  ),
+  /**
+   * `ttlMs` and `cacheScope` MUST be present on `server/discover`, on every list method, and on
+   * `resources/read`. An absent `ttlMs` means *immediately stale*, not *cache forever*.
+   */
+  CACHING_HINTS: clause(
+    "MCP 2026-07-28 — Utilities: Caching (`ttlMs` and `cacheScope` are required)",
+    `${MCP_STATELESS}/server/utilities/caching`,
+    READ_STATELESS,
+  ),
+  /** `cacheScope: "public"` permits a result to be served across authorization contexts. */
+  CACHE_SCOPE: clause(
+    "MCP 2026-07-28 — Utilities: Caching (`cacheScope` semantics)",
+    `${MCP_STATELESS}/server/utilities/caching`,
+    READ_STATELESS,
+  ),
+  /** Change notifications are opt-in: declare `listChanged`, emit over a subscribed stream. */
+  LIST_CHANGED: clause(
+    "MCP 2026-07-28 — Utilities: Caching (change notifications and `listChanged`)",
+    `${MCP_STATELESS}/server/utilities/caching`,
+    READ_STATELESS,
+  ),
+  /** Tool names: 1–128 characters from `A–Z a–z 0–9 _ - .`, unique within the server. */
+  TOOL_NAMES: clause(
+    "MCP 2026-07-28 — Server Tools (tool name constraints)",
+    `${MCP_STATELESS}/server/tools`,
+    READ_STATELESS,
+  ),
+  /** `inputSchema` MUST be a valid JSON Schema object, never null. */
+  TOOL_INPUT_SCHEMA: clause(
+    "MCP 2026-07-28 — Server Tools (`inputSchema` is a JSON Schema object)",
+    `${MCP_STATELESS}/server/tools`,
+    READ_STATELESS,
+  ),
+  /** `structuredContent` is result data paired with `outputSchema`; publishing one binds the server to it. */
+  TOOL_OUTPUT_SCHEMA: clause(
+    "MCP 2026-07-28 — Server Tools (`outputSchema` and `structuredContent`)",
+    `${MCP_STATELESS}/server/tools`,
+    READ_STATELESS,
+  ),
+  /** Execution errors ride the result with `isError`; malformed requests and unknown tools are JSON-RPC errors. */
+  TOOL_ERROR_CHANNELS: clause(
+    "MCP 2026-07-28 — Server Tools (execution errors versus protocol errors)",
+    `${MCP_STATELESS}/server/tools`,
+    READ_STATELESS,
+  ),
+  /** Tool order is part of the contract: it is what makes client and prompt caching work. */
+  TOOL_ORDER: clause(
+    "MCP 2026-07-28 — Server Tools (deterministic tool ordering)",
+    `${MCP_STATELESS}/server/tools`,
+    READ_STATELESS,
+  ),
+  /** Tools, prompts, resources, templates and server identity may each carry `icons[]`. */
+  ICONS: clause(
+    "MCP 2026-07-28 — Server Tools (`icons[]` with `src`, `mimeType`, `sizes`)",
+    `${MCP_STATELESS}/server/tools`,
+    READ_STATELESS,
+  ),
+  /**
+   * Server identity — and with it `instructions` — rides the protocol's own metadata channel:
+   * the `server/discover` result on this revision, the `initialize` result on the older one.
+   */
+  SERVER_INSTRUCTIONS: clause(
+    "MCP 2026-07-28 — Changelog (server identity and instructions on `server/discover`)",
+    `${MCP_STATELESS}/changelog`,
+    READ_STATELESS,
+  ),
+  /** Roots, Sampling, Logging, HTTP+SSE and DCR are deprecated on a twelve-month floor. */
+  DEPRECATIONS: clause(
+    "MCP 2026-07-28 — Release announcement (deprecation policy)",
+    "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+    READ_STATELESS,
   ),
 });
 
@@ -299,6 +423,40 @@ export const VENDOR = Object.freeze({
     "https://developers.openai.com/plugins/deploy/troubleshooting",
     READ,
   ),
+
+  /**
+   * Claude Code's MCP reference: the `2026-07-28` probe, `list_changed` refresh, and the sign-in
+   * failure on an unexpected `iss`.
+   */
+  ANTHROPIC_CLAUDE_CODE_MCP: clause(
+    "Anthropic — Claude Code MCP reference",
+    "https://code.claude.com/docs/en/mcp",
+    READ_STATELESS,
+  ),
+  /** What a tool description is for, and why an error must be actionable to the model. */
+  ANTHROPIC_TOOL_DESIGN: clause(
+    "Anthropic — Writing tools for agents",
+    "https://www.anthropic.com/engineering/writing-tools-for-agents",
+    READ_STATELESS,
+  ),
+  /**
+   * The one client documented to render `icons[]`, and the sourcing rule that decides whether
+   * yours load: same authority as the server for HTTP, `file://` for stdio, `data:` for anyone.
+   */
+  MICROSOFT_VSCODE_MCP: clause(
+    "Microsoft — VS Code MCP developer guide (`icons[]` since 1.105, and their sourcing)",
+    "https://code.visualstudio.com/api/extension-guides/ai/mcp",
+    READ_STATELESS,
+  ),
+  /**
+   * ChatGPT reads the server's MCP `instructions`, and from 2026-08-21 offers stable OAuth
+   * redirect URLs to authorization servers that return RFC 9207 `iss`.
+   */
+  OPENAI_PLUGIN_CHANGELOG: clause(
+    "OpenAI — Plugins, Changelog",
+    "https://developers.openai.com/plugins/changelog",
+    READ_STATELESS,
+  ),
 });
 
 /**
@@ -316,5 +474,31 @@ export function cite(
   source: SpecificationClause,
   requirement: string,
 ): string {
-  return `${requirement}\n  required by: ${source.clause}\n  read it at:  ${source.url}\n  verified:    ${source.verified}`;
+  return citation(source, requirement, "required by:");
+}
+
+/**
+ * Render an advisory that names the clause OFFERING something, rather than requiring it.
+ *
+ * The same three lines as {@link cite}, under a different relation, because an advisory is not a
+ * failure and must never read as one: "required by" on something optional is how a suite acquires a
+ * reputation for crying wolf, and a reputation like that gets the whole gate switched off.
+ *
+ * @param source - The clause this advice comes from.
+ * @param statement - What is absent or unsafe, in one sentence.
+ * @returns The advisory body.
+ */
+export function offers(
+  source: SpecificationClause,
+  statement: string,
+): string {
+  return citation(source, statement, "offered by: ");
+}
+
+function citation(
+  source: SpecificationClause,
+  statement: string,
+  relation: string,
+): string {
+  return `${statement}\n  ${relation} ${source.clause}\n  read it at:  ${source.url}\n  verified:    ${source.verified}`;
 }

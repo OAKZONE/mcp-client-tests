@@ -86,10 +86,33 @@ with no OAuth still gets every family that does not need one.
 | Family | Requires | Asks |
 |:---|:---|:---|
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
+| `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates? |
 | `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules? |
-| `protocol` *(next)* | — | Does the transport answer in the shapes the spec mandates? |
 
 Adding a family never changes an existing one. See **[docs/extending.md](docs/extending.md)**.
+
+## Requirements the spec offers, and advice it does not
+
+MCP's `2026-07-28` revision removed the handshake and the session, made `server/discover` mandatory,
+and made freshness hints required on every list. The `protocol` family fails on those, and on tool
+names, schemas, list stability, and the two error channels.
+
+It also **advises**, without failing, on everything the revision merely offers — server
+`instructions`, `icons[]` and their sourcing rule, tool descriptions, an `outputSchema`, a
+`listChanged` declaration. Each advisory names what it costs in a client that exists:
+
+```
+⚠ icons
+  the server identity publishes no `icons[]`
+    offered by:  MCP 2026-07-28 — Server Tools (`icons[]` with `src`, `mimeType`, `sizes`)
+    read it at:  https://modelcontextprotocol.io/specification/2026-07-28/server/tools
+    verified:    2026-08-29
+    costs you:   VS Code renders them for servers, resources and tools since 1.105. Claude shows a
+                 generic globe for a custom connector and closed the request as not planned […]
+```
+
+**Advisories never fail a run.** Bumping this package can turn a green run red only through a real
+requirement.
 
 ## Requirements
 

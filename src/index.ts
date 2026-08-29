@@ -42,7 +42,20 @@ export {
   type RunningDeployment,
 } from "./harness/deployment.js";
 
-export { IETF, MCP, VENDOR, cite, type SpecificationClause } from "./harness/specifications.js";
+export {
+  IETF,
+  MCP,
+  VENDOR,
+  cite,
+  offers,
+  type SpecificationClause,
+} from "./harness/specifications.js";
+
+export {
+  advise,
+  reportAdvisories,
+  type Advisory,
+} from "./harness/advisory.js";
 
 export {
   wellKnownInsertion,

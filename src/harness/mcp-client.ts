@@ -14,8 +14,21 @@
 
 import { edgeRequest, type EdgeTarget, type WireResponse } from "./edge-transport.js";
 
-/** The protocol revision the modelled clients negotiate. */
+/** The protocol revision the modelled OAuth clients negotiate. */
 export const MCP_PROTOCOL_VERSION = "2025-11-25";
+
+/**
+ * The stateless revision: no handshake, no session, per-request `_meta`.
+ *
+ * Both revisions are live — `2026-07-28` deprecates rather than deletes, on a twelve-month floor —
+ * so this package speaks whichever a suite's subject requires and never assumes a server is on one.
+ */
+export const MCP_STATELESS_REVISION = "2026-07-28";
+
+/** A protocol revision this package can speak. */
+export type McpRevision =
+  | typeof MCP_PROTOCOL_VERSION
+  | typeof MCP_STATELESS_REVISION;
 
 export interface JsonRpcResponse {
   readonly jsonrpc: "2.0";
@@ -41,6 +54,26 @@ export interface McpRequestOptions {
   /** Override `Content-Type`, so a wrong media type can be modelled deliberately. */
   readonly contentType?: string;
   readonly method?: string;
+  /**
+   * The revision this request is made on. Defaults to `2025-11-25`, so nothing written before the
+   * stateless revision changes shape.
+   *
+   * On `2026-07-28` the request additionally carries the `Mcp-Method` and `Mcp-Name` routing
+   * headers a gateway needs in order to route without parsing the body.
+   */
+  readonly revision?: McpRevision;
+}
+
+/** The JSON-RPC method a request body names, when it names one. */
+function bodyMethod(body: unknown): string | undefined {
+  const record = body as { method?: unknown } | null;
+  return typeof record?.method === "string" ? record.method : undefined;
+}
+
+/** The primitive a request body addresses, when it addresses one by name. */
+function bodyPrimitiveName(body: unknown): string | undefined {
+  const record = body as { params?: { name?: unknown } } | null;
+  return typeof record?.params?.name === "string" ? record.params.name : undefined;
 }
 
 /**
@@ -95,11 +128,21 @@ export async function mcpRequest(
   if (options.queryAccessToken !== undefined) {
     url.searchParams.set("access_token", options.queryAccessToken);
   }
+  const revision = options.revision ?? MCP_PROTOCOL_VERSION;
   const headers: Record<string, string> = {
     "content-type": options.contentType ?? "application/json",
     accept: "application/json, text/event-stream",
-    "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+    "mcp-protocol-version": revision,
   };
+  if (revision === MCP_STATELESS_REVISION) {
+    // The revision moved the negotiated version into each request's `_meta` and added these two so
+    // a gateway can route without parsing the body. Both are sent because a client that omits them
+    // exercises a path no deployed gateway sees.
+    const method = bodyMethod(body);
+    if (method !== undefined) headers["mcp-method"] = method;
+    const name = bodyPrimitiveName(body);
+    if (name !== undefined) headers["mcp-name"] = name;
+  }
   if (options.accessToken !== undefined) {
     headers.authorization = `Bearer ${options.accessToken}`;
   }
@@ -144,6 +187,71 @@ export function callToolMessage(
     method: "tools/call",
     params: { name, arguments: argumentsValue },
   };
+}
+
+/**
+ * A message on the stateless revision, carrying the `_meta` that replaced the handshake.
+ *
+ * There is no `initialize` to negotiate with any more: every request states its own protocol
+ * version and client capabilities, which is exactly what makes a list result unable to depend on a
+ * connection. Building the envelope here rather than per call site means a suite cannot accidentally
+ * assert against a half-migrated request.
+ *
+ * @param method - The JSON-RPC method, e.g. `server/discover` or `tools/list`.
+ * @param params - Method parameters; `_meta` is added to them.
+ * @param id - The JSON-RPC id.
+ * @returns The message.
+ */
+export function statelessMessage(
+  method: string,
+  params: Record<string, unknown> = {},
+  id: string | number = 1,
+): unknown {
+  return {
+    jsonrpc: "2.0",
+    id,
+    method,
+    params: {
+      ...params,
+      _meta: {
+        "io.modelcontextprotocol/protocolVersion": MCP_STATELESS_REVISION,
+        "io.modelcontextprotocol/clientCapabilities": {},
+      },
+    },
+  };
+}
+
+/** The `server/discover` message, which every server on the stateless revision must answer. */
+export function discoverMessage(id: string | number = 1): unknown {
+  return statelessMessage("server/discover", {}, id);
+}
+
+/**
+ * The result of the first JSON-RPC message in an exchange.
+ *
+ * @param exchange - What came back.
+ * @returns The result object, or undefined when the exchange carried an error or no message.
+ */
+export function firstResult(
+  exchange: McpExchange,
+): Record<string, unknown> | undefined {
+  return exchange.messages[0]?.result;
+}
+
+/**
+ * The JSON-RPC error of the first message in an exchange.
+ *
+ * Read separately from the result because the two are different channels with different meanings:
+ * an error here is a protocol error, which a model cannot fix, while a failure carried in a result
+ * is an execution error, which it often can.
+ *
+ * @param exchange - What came back.
+ * @returns The error object, or undefined when there was none.
+ */
+export function firstError(
+  exchange: McpExchange,
+): { readonly code: number; readonly message: string } | undefined {
+  return exchange.messages[0]?.error;
 }
 
 /** One parsed `WWW-Authenticate` challenge. */

@@ -12,6 +12,14 @@
  * ladder, and a step-up that does not union the challenge's scope. Anthropic's documentation opens
  * by warning against generalising one surface to another; modelling them with one profile would be
  * exactly that mistake.
+ *
+ * **Re-read 2026-08-29 against the `2026-07-28` revision. No OAuth field moved**, and what was
+ * recorded about these surfaces is a gap rather than a behaviour: **which revision each hosted
+ * surface negotiates is Unverified** — support was announced as rolling out across Claude products
+ * with no surface-by-surface breakdown — so nothing about it is asserted here. Two operational facts
+ * that follow are worth knowing while reading a failure: a hosted connector's tool list has been
+ * reproduced surviving reconnect, org-level delete-and-re-add, a restart and a tool rename, and
+ * custom connectors render a generic globe rather than published `icons[]`.
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -77,7 +85,9 @@ export function claudeDesktopProfile(clientMetadataUrl: string): VendorProfile {
     id: "claude-desktop",
     displayName: "Claude Desktop / claude.ai (hosted surfaces)",
     documentation: VENDOR.ANTHROPIC_AUTH,
-    verifiedAgainst: "Anthropic connector documentation and live CIMD, read 2026-08-14",
+    verifiedAgainst:
+      "Anthropic connector documentation and live CIMD, read 2026-08-14 and re-read 2026-08-29 " +
+      "for the 2026-07-28 revision — no OAuth field moved",
 
     // Spec priority is pre-registration → CIMD → DCR, and Claude elects CIMD when the server
     // advertises BOTH `client_id_metadata_document_supported: true` and `"none"` among the

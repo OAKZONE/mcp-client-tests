@@ -57,13 +57,40 @@ family means editing an existing suite, the abstraction is wrong — stop and fi
 | Family | Requires | Subject | Notes |
 |:---|:---|:---|:---|
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, reconnect? | Shipped |
-| `tool-surface` | — | Tool names, described parameters, bounded results, actionable errors, nothing raw crossing the model boundary | Needs only `tools/list` and a credential-free or credentialed call; the existing MCP wire client already does both |
-| `protocol` | — | `initialize`, `tools/list`, `tools/call`; both error channels; pagination; `structuredContent`/`outputSchema` conformance | Same |
+| `protocol` | — | Revision `2026-07-28`: `server/discover`, no session, caching hints, tool names and schemas, list stability, both error channels | Shipped |
+| `tool-surface` | — | Described parameters, bounded results, actionable errors, nothing raw crossing the model boundary | Needs a `tools/call` against a real tool, which is the reason it is not shipped yet: calling a consumer's tools has side effects the package must be invited to take |
 
 Note that **two of the three need no capability**. That is the point of the design: a server with no
 OAuth — or one whose consumer cannot express a session, say a Go service with no Node-side session
 helper — still gets everything that does not need one. Such a consumer supplies a target with no
 `authorization` block and calls the families it qualifies for.
+
+The `protocol` family shows the useful middle case: it needs no capability, but it does need a
+*credential* when the server refuses to list unauthenticated, and it takes one from `authorization`
+when the target has it. Where it cannot get through the gate it stops the run and names both ways
+out — never a silent skip.
+
+## Failure or advisory?
+
+The package has two outcomes, and choosing between them is the judgement that keeps the gate
+credible.
+
+**Fail** when a specification requires it. A red test is then a defect report, and the citation says
+so.
+
+**Advise** — `harness/advisory.ts` — when the specification *offers* it and a shipping client would
+use it: server `instructions`, `icons[]`, a tool description, an `outputSchema`. An advisory names
+the subject, what is absent, **what it costs in a named client**, and the clause that offers it. It
+prints after the suite and never fails the run, which is a promise to consumers: a version bump can
+turn their run red only through a real requirement.
+
+Advise **also** when a fact is real but its wire placement is not established in the sources —
+`resultType` on a list result is the shipped example. Pinning an uncertain placement as a
+requirement fails correct servers, and a suite that fails correct servers gets switched off
+entirely, taking every true finding with it.
+
+Advice with no consequence is a preference: if you cannot name the client and what its user sees,
+do not write the advisory.
 
 ## Re-verifying vendor facts
 

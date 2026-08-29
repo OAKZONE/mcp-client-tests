@@ -24,3 +24,9 @@ Thumbs.db
 .vscode/
 setup.sh
 setup.local.sh
+
+# Working notes from toolkit-alignment and planning runs. They quote the PRIVATE
+# toolkit verbatim (rule IDs, template text, sync behaviour), this repository is
+# PUBLIC, and `files: ["docs"]` would ship them to every consumer. Same reason as
+# the block above: never let toolkit content into a tracked file here.
+docs/todo/

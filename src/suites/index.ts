@@ -3,21 +3,23 @@
  *
  * ## The registry
  *
- * A **family** is a group of suites that share a required capability and a subject. Today there is
- * one — OAuth conformance, which requires {@link AuthorizationCapability} and asks "can each vendor's
- * client connect to this server?". Families planned next ask different questions of the same running
- * deployment and need nothing new from the consumer:
+ * A **family** is a group of suites that share a required capability and a subject.
  *
  * | Family | Requires | Asks |
  * |:---|:---|:---|
  * | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
- * | `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules — names, described parameters, bounded results, actionable errors, no raw identifiers crossing out? |
- * | `protocol` *(next)* | — | Does the transport answer `initialize`, `tools/list`, and `tools/call` in the shapes the specification mandates, including both error channels? |
+ * | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates — `server/discover`, no session, caching hints, legal tool names, both error channels? |
+ * | `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules — described parameters, bounded results, actionable errors, no raw identifiers crossing out? |
  *
  * Two of those three require **no capability at all**, which is the point of the design: a server
  * with no authorization — or one written in another language whose consumer cannot express a
  * session — still gets everything that does not need one. The consumer opts in by calling the
  * family's `define…` function; a family it does not call costs it nothing.
+ *
+ * The `protocol` family shows the shape of "requires nothing" precisely: it needs a *credential*
+ * only when the server refuses to list unauthenticated, and it takes that from the authorization
+ * capability if the target has one. A gate it cannot get through stops the run with both ways out
+ * named, because a family that quietly asserted nothing is worse than one that failed.
  *
  * ## Adding a family
  *
@@ -37,3 +39,8 @@ export {
   defineClaudeCodeSuite,
   defineChatgptDesktopSuite,
 } from "./oauth/index.js";
+
+export {
+  defineProtocolConformanceSuites,
+  defineWireConformanceSuite,
+} from "./protocol/index.js";

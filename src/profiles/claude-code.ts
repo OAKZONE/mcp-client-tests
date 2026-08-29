@@ -24,6 +24,20 @@
  *
  * It also carries no `urn:ietf:params:oauth:grant-type:jwt-bearer` grant, so Enterprise Managed Auth
  * is not offered on this surface.
+ *
+ * **Re-read 2026-08-29 against the `2026-07-28` revision. No OAuth field moved**, and three
+ * behaviours were recorded that change what a server owes this client:
+ *
+ * - Its v2 runtime is on MCP TypeScript SDK 2.0 and **asks HTTP and claude.ai connector servers
+ *   whether they support revision `2026-07-28`, using it with those that do** — so `server/discover`
+ *   is traffic this surface actually sends. The protocol family asserts that.
+ * - It **fails a sign-in outright when the authorization response names an unexpected issuer**, the
+ *   RFC 9207 validation the revision requires of clients. It presents as a broken consent screen
+ *   rather than as an issuer error, which is why this suite asserts `iss` explicitly.
+ * - It **refreshes on `list_changed`** for tools, prompts and resources over a stream it holds open,
+ *   under hard reopen limits: a stream that keeps closing within ten seconds is reopened three times
+ *   and then abandoned. That is a deployment property (proxy idle timeouts), not an OAuth one, so it
+ *   is recorded here rather than asserted.
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -101,7 +115,8 @@ export function claudeCodeProfile(
     displayName: "Claude Code (CLI / IDE)",
     documentation: VENDOR.ANTHROPIC_AUTH,
     verifiedAgainst:
-      "Claude Code MCP reference, CHANGELOG v2.1.49–v2.1.231, and the live Claude Code CIMD, read 2026-08-14",
+      "Claude Code MCP reference, CHANGELOG v2.1.49–v2.1.238, and the live Claude Code CIMD, " +
+      "read 2026-08-14 and re-read 2026-08-29 for the 2026-07-28 revision — no OAuth field moved",
 
     // CIMD since v2.1.81 (SEP-991), discovered automatically. Claude Code never uses
     // Anthropic-held client credentials; `--client-id` pre-registration and DCR are its alternates.

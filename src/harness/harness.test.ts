@@ -14,12 +14,29 @@
 
 import { describe, expect, it } from "vitest";
 
+import { advise, formatAdvisories, takeAdvisories } from "./advisory.js";
 import { findForm, browserOriginFor } from "./browser.js";
 import { consentControls } from "./flow.js";
-import { parseBearerChallenge } from "./mcp-client.js";
+import {
+  MCP_STATELESS_REVISION,
+  parseBearerChallenge,
+  statelessMessage,
+} from "./mcp-client.js";
+import {
+  advertisedVersions,
+  duplicateToolNames,
+  iconSourcingProblem,
+  inputSchemaProblem,
+  publishedIcons,
+  readCachingHints,
+  resultTypeOf,
+  serverIdentity,
+  SERVER_INFO_META_KEY,
+  toolNameProblem,
+} from "./mcp-surface.js";
 import { createLoopbackTlsMaterial } from "./tls-certificate.js";
 import { wellKnownInsertion } from "./vendor-profile.js";
-import { cite, IETF } from "./specifications.js";
+import { cite, offers, IETF, MCP } from "./specifications.js";
 import type { WireResponse } from "./edge-transport.js";
 
 function fakeResponse(headers: Record<string, string>): WireResponse {
@@ -204,5 +221,252 @@ describe("cite", () => {
     expect(message).toContain(IETF.PKCE.clause);
     expect(message).toContain(IETF.PKCE.url);
     expect(message).toContain(IETF.PKCE.verified);
+  });
+});
+
+describe("toolNameProblem", () => {
+  it("accepts a name using the whole permitted vocabulary", () => {
+    expect(toolNameProblem("catalog.find_entity-v2")).toBeUndefined();
+  });
+
+  it("names the characters that put a name outside the vocabulary", () => {
+    // The finding has to say WHICH character: the author of `search files` and the author of
+    // `search:files` have the same symptom and different fixes.
+    const problem = toolNameProblem("search files, now");
+
+    expect(problem).toContain('" "');
+    expect(problem).toContain('","');
+  });
+
+  it("refuses a name past the length the contract names", () => {
+    expect(toolNameProblem("a".repeat(129))).toContain("129 characters");
+    expect(toolNameProblem("a".repeat(128))).toBeUndefined();
+  });
+
+  it("treats an absent or empty name as a problem rather than a pass", () => {
+    expect(toolNameProblem("")).toBeDefined();
+    expect(toolNameProblem(undefined)).toBeDefined();
+  });
+});
+
+describe("duplicateToolNames", () => {
+  it("reports each duplicated name once, whatever its multiplicity", () => {
+    expect(duplicateToolNames(["a", "b", "a", "a", "c"])).toEqual(["a"]);
+  });
+
+  it("finds nothing in a unique list", () => {
+    expect(duplicateToolNames(["a", "b"])).toEqual([]);
+  });
+});
+
+describe("inputSchemaProblem", () => {
+  it("accepts an object schema", () => {
+    expect(inputSchemaProblem({ type: "object", properties: {} })).toBeUndefined();
+  });
+
+  it("reports null against the clause that forbids it by name", () => {
+    expect(inputSchemaProblem(null)).toContain("null");
+  });
+
+  it("reports a schema that does not describe an object", () => {
+    expect(inputSchemaProblem({ type: "string" })).toContain('"string"');
+  });
+
+  it("reports an absent schema", () => {
+    expect(inputSchemaProblem(undefined)).toBe("is absent");
+  });
+});
+
+describe("readCachingHints", () => {
+  it("reads hints carried on the result", () => {
+    expect(readCachingHints({ ttlMs: 60_000, cacheScope: "private" })).toEqual({
+      ttlMs: 60_000,
+      cacheScope: "private",
+      carriedIn: "result",
+    });
+  });
+
+  it("reads `ttlMs: 0` as published rather than as absent", () => {
+    // `0` means "always stale", which is a deliberate answer. Treating it as absent would report a
+    // server that answered the question as one that ignored it.
+    expect(readCachingHints({ ttlMs: 0, cacheScope: "public" }).carriedIn).toBe("result");
+  });
+
+  it("falls back to `_meta` and says where it found them", () => {
+    expect(readCachingHints({ _meta: { ttlMs: 5, cacheScope: "public" } })).toEqual({
+      ttlMs: 5,
+      cacheScope: "public",
+      carriedIn: "_meta",
+    });
+  });
+
+  it("reports absent when neither envelope carries them", () => {
+    expect(readCachingHints({ tools: [] })).toEqual({ carriedIn: "absent" });
+  });
+});
+
+describe("serverIdentity", () => {
+  it("reads the `_meta` key the stateless revision moved identity onto", () => {
+    // A `server/discover` result has no `serverInfo` field at all — it carries `supportedVersions`,
+    // `capabilities` and `instructions`, and the identity rides `_meta`. Looking only at the
+    // top-level field reports a server that publishes a full identity as publishing none.
+    expect(
+      serverIdentity({ _meta: { [SERVER_INFO_META_KEY]: { name: "x" } } }),
+    ).toEqual({
+      fields: { name: "x" },
+      carriedIn: `_meta["${SERVER_INFO_META_KEY}"]`,
+    });
+  });
+
+  it("reads the top-level `serverInfo` an `initialize` result carries on the older revision", () => {
+    expect(serverIdentity({ serverInfo: { name: "x" } })?.carriedIn).toBe("serverInfo");
+  });
+
+  it("prefers the revision's own location when a server publishes both", () => {
+    expect(
+      serverIdentity({
+        serverInfo: { name: "legacy" },
+        _meta: { [SERVER_INFO_META_KEY]: { name: "current" } },
+      })?.fields.name,
+    ).toBe("current");
+  });
+
+  it("reports no identity rather than an empty one", () => {
+    // The difference decides whether the advice is "add a field" or "publish an identity at all".
+    expect(serverIdentity({ tools: [] })).toBeUndefined();
+  });
+});
+
+describe("advertisedVersions", () => {
+  it("reads the revisions a `server/discover` result advertises", () => {
+    expect(
+      advertisedVersions({ supportedVersions: ["2025-11-25", "2026-07-28"] }),
+    ).toEqual(["2025-11-25", "2026-07-28"]);
+  });
+
+  it("reports none when the result advertises none, rather than inventing one", () => {
+    expect(advertisedVersions({ capabilities: {} })).toEqual([]);
+  });
+});
+
+describe("iconSourcingProblem", () => {
+  it("accepts an icon on the server's own authority", () => {
+    expect(
+      iconSourcingProblem("https://mcp.example.com/icon.png", "https://mcp.example.com"),
+    ).toBeUndefined();
+  });
+
+  it("accepts a `data:` URI from any server", () => {
+    expect(
+      iconSourcingProblem("data:image/png;base64,AAA", "https://mcp.example.com"),
+    ).toBeUndefined();
+  });
+
+  it("accepts a relative src, which resolves onto the server's own origin", () => {
+    expect(iconSourcingProblem("/static/icon.png", "https://mcp.example.com")).toBeUndefined();
+  });
+
+  it("reports a CDN-hosted icon, which loads nowhere and says nothing", () => {
+    const problem = iconSourcingProblem(
+      "https://cdn.example.net/icon.png",
+      "https://mcp.example.com",
+    );
+
+    expect(problem).toContain("https://cdn.example.net");
+    expect(problem).toContain("https://mcp.example.com");
+  });
+
+  it("reports a `file://` icon on an HTTP server, where it is offered to stdio servers only", () => {
+    expect(iconSourcingProblem("file:///icons/x.png", "https://mcp.example.com")).toContain(
+      "stdio",
+    );
+  });
+});
+
+describe("publishedIcons", () => {
+  it("returns the icon entries", () => {
+    expect(publishedIcons({ icons: [{ src: "a" }, { src: "b" }] })).toHaveLength(2);
+  });
+
+  it("returns nothing for a surface that publishes none, or publishes a non-array", () => {
+    expect(publishedIcons({})).toEqual([]);
+    expect(publishedIcons({ icons: "none" })).toEqual([]);
+  });
+});
+
+describe("resultTypeOf", () => {
+  it("reads it from the result, then from `_meta`", () => {
+    expect(resultTypeOf({ resultType: "complete" })).toBe("complete");
+    expect(resultTypeOf({ _meta: { resultType: "input_required" } })).toBe("input_required");
+  });
+
+  it("reports none when the result declares none", () => {
+    expect(resultTypeOf({ tools: [] })).toBeUndefined();
+  });
+});
+
+describe("statelessMessage", () => {
+  it("carries the protocol version and capabilities the handshake used to negotiate", () => {
+    // There is no `initialize` on this revision, so a request omitting this `_meta` never states
+    // which protocol it speaks — and the whole protocol family asserts against it.
+    const message = statelessMessage("tools/list") as {
+      params: { _meta: Record<string, unknown> };
+    };
+
+    expect(message.params._meta["io.modelcontextprotocol/protocolVersion"]).toBe(
+      MCP_STATELESS_REVISION,
+    );
+    expect(message.params._meta["io.modelcontextprotocol/clientCapabilities"]).toEqual({});
+  });
+});
+
+describe("advisories", () => {
+  const advisory = {
+    subject: "server identity",
+    finding: "publishes no `icons[]`",
+    consequence: "VS Code renders them since 1.105; this server shows a default instead.",
+    source: MCP.ICONS,
+  };
+
+  it("drains what was recorded, so a second report never repeats the first", () => {
+    advise("scope-a", advisory);
+
+    expect(takeAdvisories("scope-a")).toHaveLength(1);
+    expect(takeAdvisories("scope-a")).toHaveLength(0);
+  });
+
+  it("keeps scopes apart, so two targets in one run do not merge", () => {
+    advise("scope-b", advisory);
+    advise("scope-c", { ...advisory, subject: "tool descriptions" });
+
+    expect(takeAdvisories("scope-b").map((entry) => entry.subject)).toEqual(["server identity"]);
+    expect(takeAdvisories("scope-c").map((entry) => entry.subject)).toEqual(["tool descriptions"]);
+  });
+
+  it("renders the subject, the finding, the cost, and the clause that OFFERS it", () => {
+    const report = formatAdvisories("wire", [advisory]);
+
+    expect(report).toContain("server identity");
+    expect(report).toContain("publishes no `icons[]`");
+    expect(report).toContain("VS Code renders them since 1.105");
+    expect(report).toContain(MCP.ICONS.url);
+    // The relation is this channel's whole promise: advice must never read as a requirement, or a
+    // reader stops believing the failures too.
+    expect(report).toContain("offered by:");
+    expect(report).not.toContain("required by:");
+  });
+
+  it("says nothing at all when there is nothing to advise", () => {
+    expect(formatAdvisories("wire", [])).toBe("");
+  });
+});
+
+describe("offers", () => {
+  it("carries the clause, its URL, and its verification date, under a relation of its own", () => {
+    const message = offers(IETF.PKCE, "the server publishes no PKCE methods");
+
+    expect(message).toContain(IETF.PKCE.clause);
+    expect(message).toContain(IETF.PKCE.verified);
+    expect(message).toContain("offered by:");
   });
 });

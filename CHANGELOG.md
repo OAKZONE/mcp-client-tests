@@ -1,5 +1,97 @@
 # Changelog
 
+## v0.6.0 — The stateless revision, asserted; and everything it merely offers, advised
+
+MCP shipped its largest revision since launch on 2026-07-28, and it is mostly **subtractive**, which
+is the dangerous kind: a server built on the old assumptions keeps passing its own tests while the
+ground moves. The handshake is gone. The session is gone. `server/discover` is mandatory, freshness
+hints are required on every list, and list results may no longer vary per connection.
+
+This release adds the `protocol` family, which asserts that revision over the real wire, and a
+second outcome beside pass and fail — an **advisory** — for the large amount the revision *offers*
+and does not require.
+
+### Added
+
+- **The `protocol` family** — `defineProtocolConformanceSuites(target)`. It **requires no
+  capability**: a server that lists tools unauthenticated needs nothing, and one that refuses
+  obtains a credential through the target's existing `authorization` capability. A gate it cannot
+  get through stops the run and names both ways out, rather than passing while looking at a `401`.
+  What it fails on:
+  - **`server/discover` is answered.** It is mandatory on this revision, and it is not hypothetical
+    traffic — Claude Code's v2 runtime probes HTTP and claude.ai connector servers with it and uses
+    the newer revision with those that answer. A server that does not implement it is invisible to
+    that probe and stays on the deprecated revision by default.
+  - **The discovery result advertises the revisions it supports.** With no handshake left to
+    negotiate one, `supportedVersions` is how a client decides what to speak; answering the probe
+    without naming them tells it nothing it can act on.
+  - **No `Mcp-Session-Id` is minted** for a stateless request. A server still minting one is keeping
+    per-connection state its list results are no longer permitted to depend on.
+  - **`ttlMs` and `cacheScope` are present** on `server/discover`, on every list the server
+    implements, and on `resources/read`. Absent is not neutral: a client assumes `ttlMs: 0` and
+    treats the result as immediately stale, so omitting them asks every client to re-fetch
+    everything, forever.
+  - **Tool names are inside the published vocabulary** — 1–128 characters from `A-Z a-z 0-9 _ - .`,
+    none published twice — and **every `inputSchema` is a JSON Schema object**, never null.
+  - **The tool list is identical, in order, on a second connection.** Order is part of the contract,
+    and on this revision a list may vary only by the authorization presented.
+  - **An unknown tool comes back as a protocol error**, not as a result carrying `isError`.
+    Returning it as a result teaches the model the tool exists and failed.
+- **Advisories** — a third outcome that never fails a run (`advise`, `reportAdvisories`, `offers`,
+  all exported). The `protocol` family reports what the revision offers and the server does not
+  publish, each with the clause that offers it and **what it costs in a named client**: server
+  `instructions` (ChatGPT's host reads them), `icons[]` and their same-authority sourcing rule (VS
+  Code renders them since 1.105; a CDN-hosted icon silently does not load), tool descriptions, an
+  `outputSchema`, a `listChanged` declaration, and a `tools/list` marked `public` while fetched with
+  a credential.
+- **RFC 9207 `iss` on the authorization response** (Claude Code suite). Where the authorization
+  server advertises `authorization_response_iss_parameter_supported`, the response must carry `iss`
+  equal to the issuer — Claude Code now **fails the sign-in outright** on an unexpected issuer, and
+  it presents as a broken consent screen rather than as an issuer error. Where the server does not
+  advertise it, this is an advisory instead: emitting `iss` is what ChatGPT requires before offering
+  stable OAuth redirect URLs with client-ID metadata (2026-08-21).
+
+### Changed
+
+- **All three vendor profiles re-read 2026-08-29** against the re-verified vendor documentation.
+  **No OAuth field moved on any of them**; each `verifiedAgainst` records the re-read, because
+  "checked, unchanged" is information. What was recorded instead is behaviour a server owes these
+  clients: Claude Code probes for `2026-07-28`, refreshes on `list_changed` under hard stream-reopen
+  limits, and enforces `iss`; the hosted Claude surfaces' revision is **Unverified** and their
+  connector tool lists have been reproduced surviving reconnect, delete-and-re-add, restart and
+  rename; ChatGPT's revision is **Unverified** and its branding comes from directory submission
+  assets rather than from MCP `icons[]`.
+- `src/harness/specifications.ts` carries the `2026-07-28` clauses under their own read date, and
+  four new vendor sources: the Claude Code MCP reference, the VS Code MCP developer guide, the
+  OpenAI plugin changelog, and Anthropic's *Writing tools for agents*.
+
+### Verified
+
+Driven end to end against a real consumer's deployment — a production build, a real Postgres, a real
+socket — twice. The first run found a defect **in this package**: server identity does not ride a
+`serverInfo` field on a `server/discover` result at all. The revision moved it into each result's
+`_meta`, under `io.modelcontextprotocol/serverInfo`, and the speculative locations the first draft
+guessed at reported a server publishing a full identity and two icons as publishing neither. Both
+false advisories are gone; the reader now checks the two locations that exist — that key on
+`2026-07-28`, and the top-level `serverInfo` an `initialize` result carries on `2025-11-25` — and
+guesses at no third.
+
+### Consumers
+
+**A green run can turn red here, and that is the intended behaviour of this package** — every new
+assertion above is a requirement that existed before this release and was simply not being checked.
+Read the citation on the failure before changing anything.
+
+The likely first finding is `server/discover`. If your server has not adopted the revision, expect
+that failure plus the caching-hint ones, and treat them as one migration rather than four defects:
+serve both revisions while the twelve-month deprecation window runs, add `ttlMs` and `cacheScope` to
+every list result, implement `server/discover`, make anything a client may retry idempotent, and
+move per-connection session state to an explicit server-minted handle passed as a tool argument.
+
+**Nothing in the advisory report needs fixing to stay green.** It is there because the run already
+knew, and staying silent about it would waste what it knew.
+
+
 ## v0.5.0 — ChatGPT connections survive access-token expiry
 
 ChatGPT Desktop registers the `refresh_token` grant but, unlike the model the previous profile

@@ -16,6 +16,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { advise, reportAdvisories } from "../../harness/advisory.js";
 import {
   deploymentMcpUrl,
   edgeTargetFor,
@@ -56,6 +57,9 @@ import {
 import type { VendorProfile } from "../../harness/vendor-profile.js";
 
 const SUITE_ID = "claude-code";
+
+/** The scope this suite's advisories are collected and printed under. */
+const SCOPE = "Claude Code connector conformance";
 
 /**
  * Register this surface's conformance suite against one target.
@@ -107,6 +111,7 @@ describe.skipIf(!mcpTarget.authorization)("Claude Code connector conformance", (
   }, 120_000);
 
   afterAll(async () => {
+    reportAdvisories(SCOPE);
     await authorization.clearAccountHolders(SUITE_ID);
   });
 
@@ -332,6 +337,62 @@ describe.skipIf(!mcpTarget.authorization)("Claude Code connector conformance", (
         ),
       ).toEqual([]);
     }, 60_000);
+  });
+
+  describe("issuer identification", () => {
+    it("names itself on the authorization response when it advertises RFC 9207", async () => {
+      // 🔴 This stopped being decorative. The stateless revision requires clients to validate the
+      // `iss` parameter before redeeming a code, and Claude Code now fails the sign-in outright
+      // when the issuer is unexpected — which presents to the user as a broken consent screen, not
+      // as an issuer error, so it is diagnosed as everything except what it is.
+      const advertises =
+        discovered.as.authorization_response_iss_parameter_supported === true;
+      const pending = await buildAuthorizationRequest(discovered.as, profile, {
+        clientId: session.client.client_id,
+        scope: selectedScope(profile, discovered),
+        resource: String(discovered.protectedResource.resource),
+      });
+      const leg = await runAuthorizationLeg({
+        target,
+        authorizationUrl: pending.url,
+        sessionCookieName: holder.sessionCookieName,
+        sessionCookieValue: holder.sessionCookieValue,
+        ...consentControls(authorization),
+      });
+      const returned = new URL(leg.callbackUrl).searchParams.get("iss");
+
+      if (!advertises) {
+        // Not a defect: RFC 9207 support is advertised, not assumed, and a server that does not
+        // advertise it is conformant. It is losing capability rather than lagging, which is what
+        // the advisory says.
+        advise(SCOPE, {
+          subject: "RFC 9207 issuer identification",
+          finding:
+            "the authorization-server metadata does not advertise " +
+            "`authorization_response_iss_parameter_supported`",
+          consequence:
+            "Emitting `iss` is what ChatGPT requires before it will offer stable OAuth redirect " +
+            "URLs with client-ID metadata (plugin changelog, 2026-08-21), removing the " +
+            "per-connection callback churn — and it is the identification the 2026-07-28 revision " +
+            "requires clients to validate. A server that omits it is now losing capability rather " +
+            "than merely lagging.",
+          source: IETF.ISS_RESPONSE_PARAMETER,
+        });
+        return;
+      }
+
+      expect(
+        returned,
+        cite(
+          IETF.ISS_RESPONSE_PARAMETER,
+          "An authorization server that advertises " +
+            "`authorization_response_iss_parameter_supported` MUST return `iss` on the " +
+            "authorization response, and it must be the issuer the client recorded at discovery. " +
+            "Clients are now required to validate it before redeeming the code, and Claude Code " +
+            "fails the sign-in outright when it does not match.",
+        ),
+      ).toBe(discovered.as.issuer);
+    });
   });
 
   describe("the credential lifecycle a long-lived CLI session depends on", () => {

@@ -17,7 +17,15 @@
  *
  * **What is deliberately not asserted.** OpenAI does not document how ChatGPT merges its scope
  * sources or its step-up retry bound. Those are recorded as unverified rather than guessed; the
- * suite pins this deployment's behaviour there and says so in the test's own docstring.
+ * suite pins this deployment's behaviour there and says so in the test's own docstring. The MCP
+ * revision this surface negotiates is Unverified for the same reason.
+ *
+ * **Re-read 2026-08-29 against the plugin changelog to 2026-08-21. No field moved**, and one new
+ * fact changes what a server gains by emitting RFC 9207 `iss`: since 2026-08-21 **a plugin can use
+ * a stable OAuth redirect URL together with client-ID metadata when the authorization server
+ * returns `iss`**, which removes the per-connection callback churn this profile still models. The
+ * per-connection URI remains the documented default, so it stays what the suite drives; the `iss`
+ * assertion lives in the Claude Code suite, where a client is documented to fail without it.
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -95,7 +103,8 @@ export function chatgptDesktopProfile(
     displayName: "ChatGPT (Developer mode / published plugin)",
     documentation: VENDOR.OPENAI_PLUGIN_AUTH,
     verifiedAgainst:
-      "OpenAI Plugins documentation plus live ChatGPT Desktop connector, verified 2026-08-15",
+      "OpenAI Plugins documentation plus live ChatGPT Desktop connector, verified 2026-08-15 and " +
+      "re-read 2026-08-29 including the plugin changelog to 2026-08-21 — no field moved",
 
     // ChatGPT supports CIMD, DCR, and pre-registration, and the plugin builder can select DCR even
     // when CIMD is available — so a deployment advertising both must keep both paths working. This

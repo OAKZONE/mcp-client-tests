@@ -139,6 +139,30 @@ defineClaudeDesktopSuite(target);
 defineClaudeCodeSuite(target);
 ```
 
+### The protocol family — `mcp-tests/protocol.test.ts`
+
+Asks what your server publishes, against revision `2026-07-28`: `server/discover`, no session,
+caching hints on every list, legal tool names, valid `inputSchema`s, a stable list across
+connections, and both error channels.
+
+```ts
+import { defineProtocolConformanceSuites } from "@oakzone/mcp-client-tests";
+import { target } from "./target";
+
+defineProtocolConformanceSuites(target);
+```
+
+**It requires no capability.** If your MCP endpoint lists tools without a credential, that is all it
+needs. If it refuses, it obtains one by driving a real authorization through the `authorization`
+capability — so a gated server needs that block declared, and one without it stops the run with the
+two ways out named rather than passing while looking at a `401`.
+
+This family also prints **advisories** after its results: things the specification offers that your
+server does not publish — `instructions`, `icons[]`, tool descriptions, an `outputSchema`, a
+`listChanged` declaration — each with what it costs and the clause that offers it. **Advisories never
+fail a run.** Adopting a new version of this package can turn your run red only through a real
+requirement.
+
 ## 5. Run it
 
 ```bash
