@@ -163,6 +163,71 @@ server does not publish — `instructions`, `icons[]`, tool descriptions, an `ou
 fail a run.** Adopting a new version of this package can turn your run red only through a real
 requirement.
 
+### The tool-surface family — `mcp-tests/tool-surface.test.ts`
+
+Asks the question a consumer usually arrives with: the server is up, the connection is authorized,
+the revision is right, the tool is in the list — **and it still does not run**, or it prompts on
+every call, or it is present on one client and missing on another.
+
+```ts
+import { defineToolSurfaceConformanceSuites } from "@oakzone/mcp-client-tests";
+import { target } from "./target";
+
+defineToolSurfaceConformanceSuites(target);
+```
+
+**It requires no capability**, on the same terms as the protocol family: a public surface is read
+directly, a gated one through a credential obtained from `authorization`.
+
+**Why it is separate from `protocol`.** That family judges your surface against the specification.
+This one judges it against **somebody else's software** — what a client's gate does with a list that
+is already perfectly conformant. A tool can satisfy every clause of the tools contract and still be
+dropped before the model sees it. Reporting both behind one failure message would leave you unable
+to tell which of the two you had broken.
+
+Between `tools/list` and execution sit five layers the client owns — admission, enablement,
+approval, classification, content scanning — and a call can die at any of them with nothing reported
+back to you. **`annotations` is the only one you can steer from the wire**, which is why it is the
+only one asserted on, and why everything else here is advice that saves you debugging your own
+endpoint.
+
+**What it fails on** — each of these is a fact a vendor states outright:
+
+- a tool publishing **no behavioural hint at all**. Unannotated is not neutral: the specification's
+  stated default is non-read-only, potentially destructive, non-idempotent and open-world, and the
+  clients act on exactly that — ChatGPT treats it as a **write** and confirms every call, Claude
+  withholds auto-permission, and a Codex profile is reported to refuse it with no prompt;
+- a tool with no `title` — the name a human is actually asked to approve;
+- a tool claiming `readOnlyHint` and `destructiveHint` at once;
+- a name over **64** characters, which is half what the specification permits and is what one vendor
+  publishes as its limit;
+- a schema property name outside `A-Z a-z 0-9 _ . -`, or over 64 characters, which one client
+  validates and **drops the whole tool** over, logging the reason only to itself;
+- one tool spanning safe (`GET`, `HEAD`, `OPTIONS`) and unsafe (`POST`, `PUT`, `PATCH`, `DELETE`)
+  methods — the catch-all `api_request` shape, rejected by review, and explicitly not rescued by
+  documenting the difference in the description;
+- a description hiding text you cannot see: zero-width or bidirectional-control characters, an HTML
+  comment, or an instruction to ignore what was said elsewhere.
+
+**What it advises on** — the caps (one documented, two contested, four unknown), how many of your
+tools would run unprompted, hints declared only in part, descriptions that merely *read* as
+instructions, schemas that branch at the root, destructive tools and the surfaces where nothing will
+ask, and the gates configured on the client that you can neither see nor fix.
+
+**Advice is graded, and the grade decides what can fail you.** Every clause carries how well
+established it is — `STRONG` for a primary source read directly, down through `MODERATE` and `THIN`
+to `UNVERIFIED` — and the package **refuses to build an assertion on anything below `STRONG`**. That
+is a structural guarantee rather than a convention: a widely-repeated tool ceiling that no vendor
+ever published cannot turn your build red, however tempting the number is. It reaches you as an
+advisory that prints its own grade, so you weigh it instead of taking a forum post for a
+specification.
+
+**Nothing here asks you to remove a capability to get past a gate.** A destructive tool that is the
+point of your server stays in your server. The fix is honest annotation, a title a human can judge,
+and a confirmation you own rather than borrow — because the client's prompt is absent wherever there
+is no human, and every catalog you publish is reachable from at least one surface with no approval
+gate at all.
+
 ### The discovery family — `mcp-tests/discovery.test.ts`
 
 Asks the one question every other family assumes the answer to: **can a client find you and

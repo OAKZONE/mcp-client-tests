@@ -10,8 +10,16 @@
  * | `discovery` | — | Can a client find you and start? The `401`, the metadata documents, and the URLs they are derived from — no credential needed, so this is the one family a **remote** deployment can run. |
  * | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
  * | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates — `server/discover`, no session, caching hints, legal tool names, both error channels? |
+ * | `tool-surface` | — | Will a client's gate actually let those tools run — annotated, titled, named inside the client budget, read split from write, and no description a scanner reads as an attack? |
  * | `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states — described tools, unique names, consent kept out of an attribute? |
- * | `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules — described parameters, bounded results, actionable errors, no raw identifiers crossing out? |
+ *
+ * **`protocol` and `tool-surface` judge the same list against different authorities**, which is why
+ * they are two families rather than one. `protocol` asks whether the surface satisfies the
+ * specification; `tool-surface` asks what somebody else's client will do with a surface that
+ * already does. A tool can meet every clause of the tools contract and still be dropped before the
+ * model sees it, prompted for on every call, or refused by a safety classifier — and reporting that
+ * behind the same failure message as an RFC-level MUST would leave a reader unable to tell which of
+ * the two they had broken.
  *
  * **The `webmcp` family asserts against a different specification from the rest.** WebMCP is the
  * browser API that lets a page hand its own functions to an agent attached to the browser; it
@@ -58,6 +66,11 @@ export {
   defineProtocolConformanceSuites,
   defineWireConformanceSuite,
 } from "./protocol/index.js";
+
+export {
+  defineToolSurfaceConformanceSuites,
+  defineToolGatingSuite,
+} from "./tool-surface/index.js";
 
 export {
   defineWebMcpConformanceSuites,

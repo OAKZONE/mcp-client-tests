@@ -40,7 +40,6 @@ import {
   firstError,
   firstResult,
   initializeMessage,
-  listToolsMessage,
   mcpRequest,
   statelessMessage,
   type McpExchange,
@@ -58,6 +57,12 @@ import {
   toolNameProblem,
   type ServerIdentity,
 } from "../../harness/mcp-surface.js";
+import {
+  nameSome,
+  publishedToolNames,
+  readPublishedTools,
+  type PublishedTool,
+} from "../../harness/tool-listing.js";
 import { MCP, VENDOR, cite } from "../../harness/specifications.js";
 import type { McpTestTarget } from "../../target.js";
 import { openWireConnection, type WireConnection } from "./connection.js";
@@ -78,22 +83,6 @@ const CACHEABLE_LIST_METHODS = [
 
 /** A tool name no server publishes, used to prove the protocol error channel. */
 const ABSENT_TOOL = "mcp-client-tests.no-such-tool";
-
-/** Name a few of many, so a finding stays readable when a server has fifty tools. */
-function nameSome(names: readonly string[], limit = 4): string {
-  const shown = names.slice(0, limit).map((name) => `\`${name}\``).join(", ");
-  const rest = names.length - limit;
-  return rest > 0 ? `${shown} and ${rest} more` : shown;
-}
-
-/** A tool as published. */
-interface PublishedTool {
-  readonly name?: unknown;
-  readonly description?: unknown;
-  readonly inputSchema?: unknown;
-  readonly outputSchema?: unknown;
-  readonly icons?: unknown;
-}
 
 /**
  * Register the wire conformance suite against one target.
@@ -137,47 +126,23 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
     }
 
     /**
-     * Read the tool list on whichever revision this server answers.
+     * Read the tool list on whichever revision this server answers, recording what it took.
      *
-     * The stateless shape is tried first because it is the one under test. A server still on
-     * `2025-11-25` is not refused here — its tool list is fetched through the handshake instead, so
-     * that the revision-independent assertions (names, schemas, ordering, error channels) still run
-     * and report real findings rather than one uninformative failure about the revision.
+     * The negotiation itself is `harness/tool-listing.ts`, shared with the tool-surface family; the
+     * suite state it updates is this suite's own, because the caching-hint assertions below judge
+     * the envelope the list arrived in.
      */
     async function listToolsOnEitherRevision(): Promise<
       readonly PublishedTool[]
     > {
-      const stateless = await call("tools/list");
-      const statelessResult = firstResult(stateless);
-      if (Array.isArray(statelessResult?.tools)) {
-        listAttempt = "listed on 2026-07-28";
-        toolsListResult = statelessResult;
-        return statelessResult.tools as PublishedTool[];
-      }
-      const statelessNote =
-        `2026-07-28 \`tools/list\` answered http ${stateless.http.status}` +
-        (firstError(stateless) ? ` / ${firstError(stateless)!.message}` : "");
-
-      await mcpRequest(connection.target, connection.serverUrl, initializeMessage(), {
+      const listing = await readPublishedTools({
+        target: connection.target,
+        serverUrl: connection.serverUrl,
         accessToken: connection.accessToken,
       });
-      const legacy = await mcpRequest(
-        connection.target,
-        connection.serverUrl,
-        listToolsMessage(),
-        { accessToken: connection.accessToken },
-      );
-      const legacyResult = firstResult(legacy);
-      if (Array.isArray(legacyResult?.tools)) {
-        listAttempt = `${statelessNote}; listed on 2025-11-25 after \`initialize\` instead`;
-        toolsListResult = legacyResult;
-        return legacyResult.tools as PublishedTool[];
-      }
-      listAttempt =
-        `${statelessNote}; 2025-11-25 \`initialize\` + \`tools/list\` answered ` +
-        `http ${legacy.http.status}` +
-        (firstError(legacy) ? ` / ${firstError(legacy)!.message}` : "");
-      return [];
+      listAttempt = listing.attempt;
+      if (listing.result) toolsListResult = listing.result;
+      return listing.tools;
     }
 
     /**
@@ -464,9 +429,7 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
       orientationSource = oriented.source;
       identity = serverIdentity(orientation);
       tools = await listToolsOnEitherRevision();
-      toolNames = tools.map((tool) =>
-        typeof tool.name === "string" ? tool.name : String(tool.name),
-      );
+      toolNames = publishedToolNames(tools);
       collectIdentityAdvisories();
       collectToolAdvisories();
     }, 180_000);

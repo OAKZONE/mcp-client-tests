@@ -58,9 +58,11 @@ family means editing an existing suite, the abstraction is wrong — stop and fi
 |:---|:---|:---|:---|
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, reconnect? | Shipped |
 | `protocol` | — | Revision `2026-07-28`: `server/discover`, no session, caching hints, tool names and schemas, list stability, both error channels | Shipped |
-| `tool-surface` | — | Described parameters, bounded results, actionable errors, nothing raw crossing the model boundary | Needs a `tools/call` against a real tool, which is the reason it is not shipped yet: calling a consumer's tools has side effects the package must be invited to take |
+| `tool-surface` | — | Will a client's gate let the published tools run — annotations, `title`, the 64-character name budget, read split from write, schema names a client validates, descriptions a scanner reads as an attack | Shipped |
+| `webmcp` | `webMcp` | Do pages publishing tools to an in-browser agent declare them the way the W3C draft states? | Shipped |
+| *result gating* | — | Does what a tool **returns** stay inside the size thresholds clients truncate at, and is it free of the instruction-shaped text that puts an agent into refusal? | Not shipped: it needs a `tools/call` against a real tool, whose side effects the package must be invited to take |
 
-Note that **two of the three need no capability**. That is the point of the design: a server with no
+Note that **three of the four need no capability**. That is the point of the design: a server with no
 OAuth — or one whose consumer cannot express a session, say a Go service with no Node-side session
 helper — still gets everything that does not need one. Such a consumer supplies a target with no
 `authorization` block and calls the families it qualifies for.
@@ -75,8 +77,34 @@ out — never a silent skip.
 The package has two outcomes, and choosing between them is the judgement that keeps the gate
 credible.
 
-**Fail** when a specification requires it. A red test is then a defect report, and the citation says
-so.
+### The grade decides it, and the code enforces the decision
+
+Every clause in `src/harness/specifications.ts` carries an **evidence grade**, using the same
+vocabulary the distilled vendor documentation does, so you can move between the two without
+re-learning one:
+
+| Grade | What it means | What you may do with it |
+|:---|:---|:---|
+| `strong` | A primary source read directly, or behaviour reproduced against a live deployment. | **Assert.** `cite()` accepts it. |
+| `moderate` | Vendor prose with no testable assertion, or a single field report. | Advise, via `reports()`. |
+| `thin` | An uncorroborated community report. | Advise, and say the number is not a fact. |
+| `unverified` | A gap recorded rather than filled by guess. | Advise, or say nothing. |
+
+A clause built with the plain `clause()` constructor is `strong` — `verified` already means somebody
+read the primary source on that date. Grading one **down** is a deliberate act at the call site: use
+`graded()`, and give it a `caveat` saying what corroboration is missing and what a reader must
+therefore not conclude.
+
+**`cite()` throws on anything below `strong`.** That is not a style rule you can argue with in
+review — a suite physically cannot assert on a community report, and the error names `advise()` as
+the way out. The reason is worth internalising before you reach for a workaround: the most
+quotable facts about client behaviour are the least established ones (a ~256-tool ceiling, a
+~40-tool ceiling, a profile key that hard-blocks), and every one of them would eventually fail a
+correct server. A conformance gate that fails correct servers gets switched off, taking every true
+finding with it.
+
+**Fail** when a specification requires it, or a vendor states it outright. A red test is then a
+defect report, and the citation says so.
 
 **Advise** — `harness/advisory.ts` — when the specification *offers* it and a shipping client would
 use it: server `instructions`, `icons[]`, a tool description, an `outputSchema`. An advisory names
@@ -91,6 +119,31 @@ entirely, taking every true finding with it.
 
 Advice with no consequence is a preference: if you cannot name the client and what its user sees,
 do not write the advisory.
+
+### The three relations
+
+An advisory renders under the relation its clause earns, and the renderer picks it rather than the
+caller — a graded-down clause **always** reads as *reported by*, whatever a call site asks for, so
+the unsafe direction is unrepresentable.
+
+- **`required by:`** (`cite`) — the source states it, and this fails the run.
+- **`offered by:`** (`offers`) — the source offers it and a shipping client would use it.
+- **`reported by:`** (`reports`) — it was reported, reproduced, or contested rather than stated. The
+  grade and its caveat print with it.
+
+One case needs the caller's help: a **well-established fact that nothing offers**. A client
+rewriting a root-level schema combinator is documented and certain, but no source *offers* it and no
+server can prevent it, so *offered by* would read as nonsense. Pass `relation: "reports"` on the
+advisory. Only that value is honoured, because downgrading a claim is always honest and upgrading
+one is the failure this package exists to prevent.
+
+### Adding a per-client gate fact
+
+Behaviour a client applies to a list it already has — a cap, an approval posture, a classifier, an
+administrator switch — goes in `src/profiles/client-gates.ts`, one row per client **surface**, each
+field carrying the clause it came from. Findings render from those rows rather than quoting them
+inline, so a re-verification that moves one client's behaviour moves every message that mentions it,
+and there is one place to edit — the place holding the citation.
 
 ## Re-verifying vendor facts
 

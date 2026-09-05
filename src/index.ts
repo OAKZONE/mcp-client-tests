@@ -52,8 +52,35 @@ export {
   WEBMCP,
   cite,
   offers,
+  reports,
+  type EvidenceGrade,
   type SpecificationClause,
 } from "./harness/specifications.js";
+
+export {
+  annotationProblem,
+  concealedInstructionProblem,
+  contradictoryHintProblem,
+  instructionShapedDescription,
+  mixedReadWriteProblem,
+  readToolAnnotations,
+  rootSchemaCombinatorProblem,
+  schemaPropertyNameProblem,
+  titleProblem,
+  toolNameBudgetProblem,
+  unpromptedToolCount,
+  CLIENT_TOOL_NAME_BUDGET,
+  type ToolAnnotations,
+} from "./harness/tool-gating.js";
+
+export {
+  nameSome,
+  publishedToolNames,
+  readPublishedTools,
+  type PublishedTool,
+  type ToolListing,
+  type ToolListingRequest,
+} from "./harness/tool-listing.js";
 
 export {
   openWebMcpBrowser,

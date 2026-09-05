@@ -17,7 +17,32 @@
  * `verified` date in the same commit as any assertion that moves with it.
  */
 
-/** One normative clause: what it says, and where to read it. */
+/**
+ * How well established the fact behind a clause is.
+ *
+ * **This is the axis that decides whether an expectation may fail a run.** A specification's own
+ * text and a vendor's own documentation are things this package can hold a server to. A
+ * reproduced field report, or a number circulating in a community issue log that no vendor has
+ * ever published, is not — and asserting one would make a red test an opinion, which is the exact
+ * failure mode `AGENTS.md` exists to prevent.
+ *
+ * The grades are the ones the distilled vendor documentation uses, kept verbatim so a reader can
+ * move between that source and a failure message without re-learning a vocabulary:
+ *
+ * | Grade | What it means | What this package may do with it |
+ * |:---|:---|:---|
+ * | `strong` | A primary source read directly, or behaviour reproduced against a live deployment. | **Assert.** {@link cite} accepts it. |
+ * | `moderate` | Vendor prose with no testable assertion, or a single field report. | Advise, via {@link reports}. |
+ * | `thin` | An uncorroborated community report. | Advise, and say the number is not a fact. |
+ * | `unverified` | A gap recorded rather than filled by guess. | Advise, or say nothing. Never assert. |
+ *
+ * A clause that declares no grade is `strong`: `verified` already means somebody read the primary
+ * source on that date, so the interesting case — and the one that must be declared out loud — is a
+ * fact this package is *not* certain of.
+ */
+export type EvidenceGrade = "strong" | "moderate" | "thin" | "unverified";
+
+/** One normative clause: what it says, where to read it, and how well established it is. */
 export interface SpecificationClause {
   /** Human-readable source and clause, e.g. `RFC 6750 §3.1`. */
   readonly clause: string;
@@ -25,6 +50,14 @@ export interface SpecificationClause {
   readonly url: string;
   /** ISO date this clause was last read against the live source. */
   readonly verified: string;
+  /** How well established the fact is. Absent means {@link EvidenceGrade} `strong`. */
+  readonly grade: EvidenceGrade;
+  /**
+   * Why the grade is below `strong`, in the reader's terms — what corroboration is missing, and
+   * what they must therefore not conclude. Present only on a graded-down clause, where a bare
+   * grade word would leave a reader to invent their own reason.
+   */
+  readonly caveat?: string;
 }
 
 function clause(
@@ -32,7 +65,31 @@ function clause(
   url: string,
   verified: string,
 ): SpecificationClause {
-  return Object.freeze({ clause: clauseText, url, verified });
+  return Object.freeze({ clause: clauseText, url, verified, grade: "strong" });
+}
+
+/**
+ * A clause recording a fact this package is **not** certain enough of to assert.
+ *
+ * Kept as a separate constructor rather than a fourth argument to {@link clause}, so that grading a
+ * fact down is a visible, deliberate act at the call site rather than a value someone can drift
+ * past. Everything built with this is unusable by {@link cite} — see the guard there.
+ *
+ * @param clauseText - Human-readable source and clause.
+ * @param url - Direct link.
+ * @param verified - ISO date the source was last read.
+ * @param grade - How well established the fact is.
+ * @param caveat - What corroboration is missing, and what a reader must not conclude.
+ * @returns The clause.
+ */
+function graded(
+  clauseText: string,
+  url: string,
+  verified: string,
+  grade: Exclude<EvidenceGrade, "strong">,
+  caveat: string,
+): SpecificationClause {
+  return Object.freeze({ clause: clauseText, url, verified, grade, caveat });
 }
 
 const RFC = "https://www.rfc-editor.org/rfc";
@@ -360,6 +417,47 @@ export const MCP = Object.freeze({
     `${MCP_STATELESS}/server/tools`,
     READ_STATELESS,
   ),
+
+  // ---------------------------------------------------------------------------------------------
+  // The client-side gate.
+  //
+  // Authorization decides whether a client can REACH this server. These clauses are the separate
+  // question of whether a reachable, authorized tool is offered to the model and allowed to run —
+  // and a call can die at any of five layers (admission, enablement, approval, classification,
+  // content scanning) without a message that reaches the server.
+  //
+  // `annotations` is the only one of those layers a server can steer from the wire, which is why
+  // the clauses below are worth asserting at all: everything else is configured on the client and
+  // is invisible from here.
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * A tool MAY carry `annotations`, and a client MUST treat them as untrusted unless the server is
+   * a trusted one.
+   *
+   * The second half is the reason an annotation buys **less friction, never more authority**: a
+   * client enforces its own policy regardless, so nothing declared here relaxes the server's own
+   * obligation to authorize the call.
+   */
+  TOOL_ANNOTATIONS: clause(
+    "MCP — Server Tools (`annotations`, and the untrusted-hint rule)",
+    "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * **The stated defaults for an unannotated tool**, and the single most consequential sentence in
+   * this file for a tool surface: "a tool with no annotations is assumed to be non-read-only,
+   * potentially destructive, non-idempotent, and open-world".
+   *
+   * Unannotated is therefore not neutral — it is *maximally suspicious*, and every gate downstream
+   * acts on that reading. This is what makes the absence of an `annotations` object a finding
+   * rather than a matter of taste.
+   */
+  TOOL_ANNOTATION_DEFAULTS: clause(
+    "MCP — Tool annotations announcement (the assumed defaults when `annotations` is absent)",
+    "https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/",
+    READ_VENDOR_SWEEP,
+  ),
   /** Tools, prompts, resources, templates and server identity may each carry `icons[]`. */
   ICONS: clause(
     "MCP 2026-07-28 — Server Tools (`icons[]` with `src`, `mimeType`, `sizes`, `theme`)",
@@ -619,6 +717,246 @@ export const VENDOR = Object.freeze({
     "https://developers.openai.com/plugins/changelog",
     READ_STATELESS,
   ),
+
+  // ---------------------------------------------------------------------------------------------
+  // The gate: what each client does with the tool list it received.
+  //
+  // Ordered by grade, not by vendor, because the grade is what decides whether a suite may fail on
+  // a row. Everything down to OPENAI_RISKY_ACTIONS_BLOCKED is STRONG and assertable; everything
+  // below it is graded down and reaches a consumer only as advice.
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * Anthropic's connector review criteria — the clearest published statement of what Claude's gate
+   * wants, and the source of four separate requirements this package asserts.
+   *
+   * Tool names are **64 characters or fewer**, not the specification's 128. Every tool carries a
+   * `title` and the applicable hint, and those "determine auto-permissions in Claude: read-only
+   * tools can run without per-call confirmation; destructive tools always prompt". A single tool
+   * accepting both safe and unsafe HTTP methods is **rejected** — a catch-all `api_request` with a
+   * `method` parameter is named explicitly, and "documenting safe versus unsafe operations within
+   * one tool's description does not satisfy this requirement". Descriptions are rejected when they
+   * instruct Claude rather than describe the tool.
+   */
+  ANTHROPIC_REVIEW_CRITERIA: clause(
+    "Anthropic — Connector review criteria (tool names, mandatory `title` plus hint, the " +
+      "read/write split, and the description rejection list)",
+    "https://claude.com/docs/connectors/building/review-criteria",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * OpenAI's developer-mode contract, and **the strictest annotation default in this file**:
+   * "We respect the `readOnlyHint` tool annotation. Tools without this hint are treated as write
+   * actions." Write actions require confirmation, and approval memory lasts for one conversation —
+   * a refresh prompts again — so there is no durable always-allow to design around.
+   */
+  OPENAI_DEVELOPER_MODE: clause(
+    "OpenAI — Developer mode (`readOnlyHint` respected; an unhinted tool is a write action)",
+    "https://developers.openai.com/api/docs/guides/developer-mode",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * The one documented hard tool cap in this file: "A chat request can have a maximum of 128 tools
+   * enabled at a time", failing the whole request above it.
+   *
+   * It counts **every** tool in the request — the editor's built-ins, extension-contributed tools,
+   * and every enabled MCP server — so it is a budget a server shares rather than one it owns. That
+   * is why the figure informs advice and never an assertion about a server's own tool count.
+   */
+  MICROSOFT_VSCODE_AGENT_TOOLS: clause(
+    "Microsoft — VS Code agent tools (the 128-tool per-request ceiling)",
+    "https://code.visualstudio.com/docs/copilot/agents/agent-tools",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * Why description text is scanned as an attack surface rather than read as guidance.
+   *
+   * The disclosed attack hides instructions in a description the user never sees and the model
+   * always reads. The consequence for an honest server is the part that matters here: **a
+   * legitimate instruction in a description is indistinguishable from the attack**, so it is
+   * treated as the attack.
+   */
+  INVARIANT_TOOL_POISONING: clause(
+    "Invariant Labs — MCP tool-poisoning disclosure (description text as the injection vector)",
+    "https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * Claude Code's auto-mode classifier: a second gate that runs after permission policy said yes.
+   *
+   * The published figures are the vendor's own — a first stage instructed to "err on the side of
+   * blocking" at an 8.5% false-positive rate, cut to 0.4% by a second reasoning stage that accepts
+   * a 17% false-negative rate. It is **reasoning-blind by design**: the classifier sees the user's
+   * messages and the bare tool call, never the server's output — so nothing a tool returns can
+   * argue its way past it, and a block is a routine operating condition to design around rather
+   * than a verdict on the server.
+   */
+  ANTHROPIC_AUTO_MODE: clause(
+    "Anthropic — How we built Claude Code auto mode (the two-stage classifier, and its figures)",
+    "https://www.anthropic.com/engineering/claude-code-auto-mode",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * Claude Code's organization controls, and the two that a server can neither see nor fix.
+   *
+   * `managed-mcp.json`, `allowedMcpServers` / `deniedMcpServers` and `allowManagedMcpServersOnly`
+   * refuse a connection outright — a newly-blocked server "silently disappears from `/mcp` and
+   * `claude mcp list` with no warning". Per tool, an organization may set `ask`, which **no allow
+   * rule overrides in any permission mode**, or `blocked`, which filters the tool out before Claude
+   * sees it.
+   */
+  ANTHROPIC_MANAGED_MCP: clause(
+    "Anthropic — Control MCP server access for your organization (`managed-mcp.json`, and the " +
+      "per-tool `ask` / `blocked` controls)",
+    "https://code.claude.com/docs/en/managed-mcp",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * The surface with **no gate at all**: the Messages API connector has no user interface and
+   * therefore no human to prompt.
+   *
+   * Read it as the design constraint behind every other row — every catalog a server publishes is
+   * reachable from at least one surface where nothing will confirm anything.
+   */
+  ANTHROPIC_MESSAGES_CONNECTOR: clause(
+    "Anthropic — Messages API MCP connector (no approval surface; the caller's own code decides)",
+    "https://platform.claude.com/docs/en/agents-and-tools/mcp-connector",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * GitHub's organization MCP policy, and the fact that decides an enterprise support question:
+   * it is **off by default** for the Business and Enterprise subscribers it covers, and it does not
+   * apply to Free, Pro, Pro+ or Max at all.
+   *
+   * "The server does not appear for one user in an organization and works for another" is a policy
+   * symptom, not a server defect.
+   */
+  GITHUB_COPILOT_MCP_POLICY: clause(
+    "GitHub — Copilot MCP policy and the first-start trust dialog",
+    "https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-for-organization/manage-policies",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * Cursor asks before invoking an MCP tool by default, and routes non-allowlisted calls through an
+   * Auto-review classifier that may allow, redirect, or ask.
+   *
+   * Cursor's own framing of that classifier is worth carrying: it is an **approval convenience,
+   * not a security boundary**.
+   */
+  ANYSPHERE_CURSOR_MCP: clause(
+    "Cursor — MCP (approval default, and Auto-review over non-allowlisted calls)",
+    "https://docs.cursor.com/context/mcp",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * Codex follows its `approval_policy` and permission profile rather than a classifier over MCP
+   * calls, and from v0.134.0 uses `readOnlyHint` to decide what may execute concurrently.
+   */
+  OPENAI_CODEX_MCP: clause(
+    "OpenAI — Codex configuration (`approval_policy`, permission profiles, and `readOnlyHint` " +
+      "driving concurrent execution from v0.134.0)",
+    "https://learn.chatgpt.com/docs/codex/config",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * ChatGPT refuses some calls rather than offering them: for write or modify actions it "may ask
+   * for confirmation depending on app permissions, the action's context, and the action's
+   * potential impact, and some especially risky actions may be blocked instead of being presented
+   * for approval".
+   *
+   * Vendor prose with no testable assertion behind it, so it is graded `moderate` and informs
+   * advice about owning the confirmation rather than an assertion about any particular tool.
+   */
+  OPENAI_RISKY_ACTIONS_BLOCKED: graded(
+    "OpenAI — Connector actions (some especially risky actions are blocked rather than prompted)",
+    "https://developers.openai.com/plugins/build/mcp-server",
+    READ_VENDOR_SWEEP,
+    "moderate",
+    "vendor prose naming no threshold and no tool class — it says a block can happen, never when, " +
+      "so no server can predict or test which of its tools this reaches",
+  ),
+  /**
+   * VS Code is **reported** to confirm every tool not marked `readOnlyHint: true`, and the
+   * JetBrains plugin has an open request to honour the hint the same way.
+   *
+   * Graded `moderate` because VS Code's own MCP developer guide states nothing about annotations.
+   * The practical advice is unchanged — publish them anyway, the cost is nil and two other clients
+   * act on them decisively — but it is advice, not a requirement this package may fail a run on.
+   */
+  MICROSOFT_VSCODE_ANNOTATIONS: graded(
+    "Microsoft — VS Code MCP servers (annotation handling, reported rather than documented)",
+    "https://code.visualstudio.com/docs/copilot/customization/mcp-servers",
+    READ_VENDOR_SWEEP,
+    "moderate",
+    "reported behaviour; VS Code's MCP developer guide states nothing about annotations, so the " +
+      "hint may be honoured, ignored, or changed without a note",
+  ),
+  /**
+   * The reported aggregate ceiling on Claude's hosted surfaces: ~256 tools across **all** connected
+   * connectors, keeping the alphabetically-first and truncating the rest.
+   *
+   * **Do not quote this number as fact.** It comes from a third-party issue log; Anthropic
+   * documents no tool ceiling of any kind, and a re-check on 2026-09-05 found none. The *shape* is
+   * what this package acts on and it is corroborated independently — a shared budget, spent across
+   * every server the user connected, trimmed arbitrarily by the client. Advice written against the
+   * shape holds whether or not the figure is right.
+   */
+  ANTHROPIC_AGGREGATE_TOOL_CEILING: graded(
+    "Claude hosted surfaces — reported ~256-tool aggregate ceiling with alphabetical truncation",
+    "https://github.com/anthropics/claude-ai-mcp/issues/137",
+    READ_VENDOR_SWEEP,
+    "thin",
+    "an uncorroborated community report; Anthropic publishes no ceiling, and a 2026-09-05 re-check " +
+      "found none — design to the shared-budget shape, never to the number",
+  ),
+  /**
+   * Cursor's tool ceiling, recorded as **contested rather than as a figure**.
+   *
+   * ~40 is widely repeated; a 2026-03-03 forum thread reports 80+ tools with no warning and
+   * attributes the change to Cursor's dynamic context discovery. There is no vendor number either
+   * way and no changelog entry. An undocumented ceiling existed, may have moved, and has never been
+   * published — so neither 40 nor 80 may be quoted.
+   */
+  CURSOR_TOOL_CEILING: graded(
+    "Cursor — an undocumented tool ceiling, contested between ~40 and 80+",
+    "https://docs.cursor.com/context/mcp",
+    READ_VENDOR_SWEEP,
+    "thin",
+    "two uncorroborated community figures that contradict each other, and no vendor statement — " +
+      "quote neither 40 nor 80",
+  ),
+  /**
+   * Codex profile keys reported to **hard-block** rather than prompt: a destructive- or
+   * open-world-hinted tool refused outright, with no approval offered.
+   *
+   * If it holds, it is the harshest consequence of an honest `destructiveHint` anywhere in this
+   * file — which is exactly why it is not asserted. The confirmed half is separate and STRONG:
+   * `readOnlyHint` drives concurrent execution from v0.134.0.
+   */
+  CODEX_PROFILE_HARD_BLOCK: graded(
+    "Codex CLI — reported `destructive_enabled` / `open_world_enabled` profile keys that refuse " +
+      "rather than prompt",
+    "https://learn.chatgpt.com/docs/codex/config",
+    READ_VENDOR_SWEEP,
+    "thin",
+    "a community report of key names that appear in no published configuration reference; the " +
+      "behaviour may not exist, and no server can detect it",
+  ),
+  /**
+   * Whether Cursor and Grok read a tool's `annotations` at all.
+   *
+   * Recorded as a gap rather than filled by guess. A server publishes annotations regardless — the
+   * cost is nil and two clients act on them decisively — but nothing here may claim what these two
+   * do with them.
+   */
+  ANNOTATION_HANDLING_UNVERIFIED: graded(
+    "Cursor and Grok — whether a tool's `annotations` are read at all",
+    "https://docs.cursor.com/context/mcp",
+    READ_VENDOR_SWEEP,
+    "unverified",
+    "no vendor statement and no reproduced observation either way — publish annotations, and " +
+      "assume nothing about what these clients do with them",
+  ),
 });
 
 /**
@@ -636,6 +974,21 @@ export function cite(
   source: SpecificationClause,
   requirement: string,
 ): string {
+  if (source.grade !== "strong") {
+    // Not a test failure — a defect in this package, raised where it is written rather than
+    // reported as a finding about somebody's server (MCT05). A suite that failed a run on a
+    // community report would be asserting an opinion, which is the one thing `AGENTS.md` forbids
+    // outright; making that unrepresentable is cheaper than trusting every future author to
+    // remember. `reports()` is the channel for a fact graded below `strong`.
+    throw new Error(
+      `mcp-client-tests: cannot assert on a ${source.grade.toUpperCase()}-graded clause.\n` +
+        `  clause:   ${source.clause}\n` +
+        `  caveat:   ${source.caveat ?? "(none recorded)"}\n` +
+        "  Only a fact read from a primary source may fail a consumer's run. Record this one with " +
+        "`advise()` and `reports()` instead, which says what was observed without claiming a " +
+        "requirement the source does not carry.",
+    );
+  }
   return citation(source, requirement, "required by:");
 }
 
@@ -657,10 +1010,46 @@ export function offers(
   return citation(source, statement, "offered by: ");
 }
 
+/**
+ * Render an advisory for a fact this package is **not certain of** — a client behaviour reported
+ * but not documented, a number circulating with no vendor behind it, a gap nobody has filled.
+ *
+ * The third relation, beside {@link cite}'s *required by* and {@link offers}'s *offered by*. It
+ * exists because those two both imply a source that **states** something, and the most useful
+ * things known about a client's gate are not stated anywhere: they are reproduced, reported, or
+ * contested. Saying nothing would waste what the sweep learned; saying "required by" would be a
+ * lie that eventually gets the whole gate switched off.
+ *
+ * The grade and its caveat are rendered with the citation, so a reader sees *how much to trust
+ * this* in the same glance as *where it came from* — which is the difference between advice they
+ * can act on and advice they have to go research.
+ *
+ * @param source - The clause this observation comes from. Normally graded below `strong`; a
+ *   `strong` clause is accepted, for the case where a well-established fact is still only worth
+ *   reporting because the server cannot act on it.
+ * @param statement - What was observed, in one sentence.
+ * @returns The advisory body.
+ */
+export function reports(
+  source: SpecificationClause,
+  statement: string,
+): string {
+  return citation(source, statement, "reported by:");
+}
+
 function citation(
   source: SpecificationClause,
   statement: string,
   relation: string,
 ): string {
-  return `${statement}\n  ${relation} ${source.clause}\n  read it at:  ${source.url}\n  verified:    ${source.verified}`;
+  const lines = [
+    statement,
+    `  ${relation} ${source.clause}`,
+    `  read it at:  ${source.url}`,
+    `  verified:    ${source.verified}`,
+  ];
+  if (source.grade !== "strong") {
+    lines.push(`  evidence:    ${source.grade.toUpperCase()} — ${source.caveat}`);
+  }
+  return lines.join("\n");
 }

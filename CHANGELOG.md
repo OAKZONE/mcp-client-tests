@@ -1,5 +1,140 @@
 # Changelog
 
+## v0.8.0 — The client gate: why an authorized tool still does not run, and an evidence grade that decides what may fail you
+
+Everything this package asserted until now answered one of two questions: can a client **reach**
+your server, and does what it finds there match the specification. A consumer can pass both and
+still have tools that are "hit and miss" across clients — disabled before they are ever called,
+prompted for on every use, or refused by a safety layer for calls the server was built to serve.
+
+That third question now has a family. It also has a constraint the other families never needed:
+**most of what is known about how clients gate tools is not published by anybody.** The ceiling
+people quote for one client comes from an issue log; for another it is contested between two figures
+that differ by a factor of two; for four more it is unknown. So this release adds the grading
+mechanism first and the assertions second — because without the grade, the most quotable facts here
+are exactly the ones that would eventually fail a correct server.
+
+### Added — evidence grades, and a guard that makes them binding
+
+Every clause in `specifications.ts` now carries an `EvidenceGrade`, in the vocabulary the vendor
+documentation already uses:
+
+| Grade | What it means | What the package may do with it |
+|:---|:---|:---|
+| `strong` | A primary source read directly, or behaviour reproduced live. | **Assert.** |
+| `moderate` | Vendor prose with no testable assertion, or a single field report. | Advise. |
+| `thin` | An uncorroborated community report. | Advise, printed with what is missing. |
+| `unverified` | A gap recorded rather than guessed at. | Advise, or nothing. |
+
+**`cite()` now throws when handed anything below `strong`**, naming `advise()` as the way out. This
+is the part worth knowing before you bump: it is not a convention a future contributor can quietly
+drift past, it is a structural guarantee that **a number no vendor ever published can never turn
+your build red**. A clause built with `clause()` is `strong` by construction; grading one down uses
+`graded()`, which demands a caveat saying what corroboration is missing.
+
+Advisories render under the relation their clause earns — `offered by:` for a `strong` one,
+`reported by:` for anything less, with the grade and caveat printed beside it. The renderer picks,
+not the call site, so a community report can never be presented as though a vendor had stated it.
+New `reports()` export for the third relation.
+
+### Added — the `tool-surface` family
+
+```ts
+import { defineToolSurfaceConformanceSuites } from "@oakzone/mcp-client-tests";
+defineToolSurfaceConformanceSuites(target);
+```
+
+**Requires no capability**, on the same terms as `protocol`. It is opt-in like every family, so
+**nothing goes red until you register it**.
+
+Between `tools/list` and execution sit five layers the client owns — admission, enablement,
+approval, classification, content scanning — and a call can die at any of them with nothing reported
+back. **`annotations` is the only one you can steer from the wire**, so it is the only one asserted
+on. Everything else is advice that saves you debugging an endpoint that was never the problem.
+
+**What fails** — each a fact a vendor states outright:
+
+- **A tool publishing no behavioural hint at all.** Unannotated is not neutral: the specification's
+  stated default is non-read-only, potentially destructive, non-idempotent and open-world, and the
+  clients act on exactly that. ChatGPT treats an unhinted tool as a **write** and confirms every
+  call — with approval memory that lasts one conversation and resets on refresh, so it never stops
+  asking. Claude withholds auto-permission. A Codex profile is reported to refuse it outright.
+- **A tool with no `title`** — the name a human is actually asked to approve. `create_deployment` is
+  a decision somebody can make; `svc_dpl_create_v2` is a decision they decline.
+- **A tool claiming `readOnlyHint` and `destructiveHint` at once.**
+- **A name over 64 characters** — half what the specification permits, and what one vendor publishes
+  as its limit. An over-long name is reported to fail the whole server connection, not the one tool.
+- **A schema property name outside `A-Z a-z 0-9 _ . -`, or over 64 characters.** One client runs the
+  API's own checks at load time and **drops the whole tool**, logging the reason only to itself. A
+  tool that works in one client and is missing in another is this far more often than it is an
+  authorization problem.
+- **One tool spanning safe (`GET`, `HEAD`, `OPTIONS`) and unsafe (`POST`, `PUT`, `PATCH`, `DELETE`)
+  methods** — the catch-all `api_request` shape, named explicitly as a rejection, and explicitly not
+  rescued by documenting the difference in the description.
+- **A description hiding text a user cannot see** — zero-width or bidirectional-control characters,
+  an HTML comment, or an instruction to ignore what was said elsewhere.
+
+**What advises**: how many of your tools would run unprompted (the figure that moves when the
+annotations land), hints declared only in part, catalog size against every published cap with its
+grade, descriptions that merely *read* as instructions, schemas that branch at the root, destructive
+tools and the surfaces where nothing will ask, and the gates configured client-side that you can
+neither see nor fix.
+
+**Detection is deliberately narrow where a guess would be cheap.** A generic `action` enum is not
+flagged as mixed read/write — only HTTP methods, which is the shape the source names — and a
+cross-tool reference like "copy an id from `find_report`" is never read as steering, because that is
+something the tool-design rules positively ask for. A gate that fails correct servers gets switched
+off, taking every true finding with it.
+
+**Nothing here recommends removing a capability to get past a gate.** A destructive tool that is the
+point of your server stays in your server; the fix is honest annotation, a title a human can judge,
+and a confirmation you own rather than borrow.
+
+### Added — the per-client gate matrix, as data
+
+`src/profiles/client-gates.ts` carries one `ClientGate` row per client **surface** — ChatGPT, Claude
+hosted, Claude Code, VS Code Copilot, Codex CLI, Cursor, and the Messages API connector — each with
+its annotation handling, tool cap, approval default, classifier, and administrator off-switch, and
+each field citing its source. Findings render from these rows, so a re-verification that moves one
+client's behaviour moves every message quoting it.
+
+The Messages API row is the design constraint behind all of them: **every catalog you publish is
+reachable from at least one surface with no approval gate at all.**
+
+Exported: `CLIENT_GATES`, the individual rows, `unannotatedConsequences()`, `toolCapSummary()`.
+
+### Changed
+
+- **`readPublishedTools()` moved into the harness** (`harness/tool-listing.ts`), shared by the
+  `protocol` and `tool-surface` families rather than duplicated. `PublishedTool`,
+  `publishedToolNames()` and `nameSome()` come with it. No assertion changed; the `protocol` family
+  reads the same list by the same negotiation as before.
+- `SpecificationClause` gained `grade` and an optional `caveat`. A clause built by `clause()` is
+  `strong`, so no existing citation changed meaning.
+- The advisory report header now says how many entries cite a source graded below `STRONG`.
+- **The "cannot see the surface" error names the calling family and the remote dead end.** It
+  previously said "the protocol suites" whoever was asking, and offered two ways out of which a
+  `remote` target can only ever take one. It now names the suite, and says plainly that a remote
+  deployment cannot obtain a credential at all — register `defineDiscoveryConformanceSuites` there
+  instead. Verified against a live gated server during the release gate.
+
+### Toolkit alignment
+
+Pinned to `@oakzone/agent-toolkit#v0.70.0`, whose research this release is written from, and added
+the `PROJECT-MAP.md` this repository never had — which is why the MCP framework guides were not
+loading here at all. All four are now enabled and deliberately unscoped: scoping pays where MCP is a
+*feature*, and here it is the *product*.
+
+### Migration
+
+**Register the new family to get the new findings** — `defineToolSurfaceConformanceSuites(target)`.
+Until you do, your run is unchanged.
+
+Expect it to be red the first time on a surface that has never been annotated, and read the
+failures in this order: `title` and one honest hint on every tool, then split anything spanning read
+and write. Those two are most of the distance, and they are what the number in the
+"auto-permission" advisory measures.
+
 ## v0.7.0 — WebMCP joins as a family of its own, driven in a real browser, and a redirect fact we had backwards is corrected
 
 Two unrelated things, both worth a consumer's attention before bumping.

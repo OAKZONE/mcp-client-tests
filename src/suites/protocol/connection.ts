@@ -1,10 +1,15 @@
 /**
  * Getting far enough into a server to look at its surface, whether or not it has authorization.
  *
- * The protocol family asks what the server publishes — its discovery result, its tool list, its
- * caching hints — and every one of those is behind whatever gate the server puts in front of the
- * MCP endpoint. So this module answers one question before any suite runs: **can this run see the
- * surface at all, and if not, what is the consumer supposed to do about it?**
+ * The `protocol` family asks what the server publishes — its discovery result, its tool list, its
+ * caching hints. The `tool-surface` family asks what a client's gate will do with the same list.
+ * Both are behind whatever gate the server puts in front of the MCP endpoint, so this module
+ * answers one question before either of them runs: **can this run see the surface at all, and if
+ * not, what is the consumer supposed to do about it?**
+ *
+ * It lives under `protocol/` because that is the family it was written for, and it is deliberately
+ * family-neutral in what it does and says — the caller names itself through `suiteId`, and nothing
+ * here knows which family is asking.
  *
  * Three outcomes, in order of preference:
  *
@@ -104,9 +109,15 @@ export async function openWireConnection(
     throw new Error(
       `The MCP endpoint refused an unauthenticated \`tools/list\` with ` +
         `${unauthenticated.http.status}, and this target declares no authorization capability, so ` +
-        "the protocol suites cannot see the surface they exist to inspect.\n" +
+        `the suites in "${suiteId}" cannot see the surface they exist to inspect.\n` +
         "  Either declare `authorization` on the target so a credential can be obtained, or serve " +
-        "discovery and listing unauthenticated and challenge on the first protected `tools/call`.",
+        "discovery and listing unauthenticated and challenge on the first protected `tools/call`.\n" +
+        "  Note that a `remote` deployment can never take the first option: obtaining a credential " +
+        "means creating an account holder in the server's storage and having the server trust a " +
+        "certificate authority minted for this run, both of which need the process to have been " +
+        "started here. Against a server this run did not start, register " +
+        "`defineDiscoveryConformanceSuites(target)` instead — it asserts the whole authorization " +
+        "surface a client reads before it has a token.",
     );
   }
 

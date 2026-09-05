@@ -88,8 +88,13 @@ with no OAuth still gets every family that does not need one.
 | `discovery` | — | Can a client find you and start? Runs against a **remote** deployment, so you can point it at staging or production. |
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
 | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates? |
+| `tool-surface` | — | Will a client's gate actually let those tools run — or drop, prompt, or refuse them? |
 | `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states? |
-| `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules? |
+
+**`protocol` and `tool-surface` judge the same tool list against different authorities.** `protocol`
+asks whether the surface satisfies the specification. `tool-surface` asks what somebody else's
+client will do with a surface that already does — because between `tools/list` and execution sit
+five layers the client owns, and a call can die at any of them with nothing reported back to you.
 
 **`webmcp` asserts against a different specification from the rest.** WebMCP is the browser API that
 lets a page hand its own functions to an agent attached to the browser. It borrows MCP's vocabulary
@@ -123,6 +128,34 @@ It also **advises**, without failing, on everything the revision merely offers �
 
 **Advisories never fail a run.** Bumping this package can turn a green run red only through a real
 requirement.
+
+### What may fail you is decided by evidence, not by opinion
+
+Most of what is known about MCP clients is not published by anybody. The tool ceiling people quote
+for one client comes from an issue log; for another it is contested between two figures that differ
+by a factor of two; for four more it is simply unknown. Those facts are worth telling you and are
+not worth failing your build over, so every clause here carries a **grade**:
+
+| Grade | What it means | What this package does with it |
+|:---|:---|:---|
+| `STRONG` | A primary source read directly, or behaviour reproduced live. | May **fail** your run. |
+| `MODERATE` | Vendor prose with no testable assertion, or a single field report. | Advice only. |
+| `THIN` | An uncorroborated community report. | Advice, printed with what is missing. |
+| `UNVERIFIED` | A gap recorded rather than guessed at. | Advice, or nothing. |
+
+**The rule is enforced in code, not by convention:** building an assertion on anything below
+`STRONG` throws inside the package. A number no vendor ever published cannot turn your build red,
+however widely it is repeated. It reaches you like this instead:
+
+```
+⚠ catalog size
+  this server publishes 31 tools, and the ceiling it is measured against is not its own
+    reported by: Claude hosted surfaces — reported ~256-tool aggregate ceiling […]
+    verified:    2026-09-05
+    evidence:    THIN — an uncorroborated community report; Anthropic publishes no ceiling, and a
+                 2026-09-05 re-check found none — design to the shared-budget shape, never to the
+                 number
+```
 
 ## Requirements
 

@@ -28,8 +28,18 @@ Three consequences, all binding:
    somebody's implementation.
 2. **A vendor profile is edited only when that vendor's documentation changes**, with
    `verifiedAgainst` updated in the same commit. Never to make a red test green.
-3. **Only vendor-established facts are asserted.** Where a vendor records a behaviour as unverified,
-   pin the server's behaviour and name the uncertainty in the docstring.
+3. **Only vendor-established facts are asserted, and the code enforces it.** Every clause carries an
+   **evidence grade** — `strong` / `moderate` / `thin` / `unverified`, the same vocabulary the
+   distilled vendor documentation uses — and **`cite()` throws on anything below `strong`**. A fact
+   graded down can therefore only ever reach a consumer through `advise()`, which prints its grade
+   and its caveat beside it.
+
+   Grading is a deliberate act at the call site: `clause()` builds a `strong` one, `graded()` builds
+   anything less and demands a caveat saying what corroboration is missing. **Do not work around the
+   guard.** The most quotable facts about client behaviour are the least established — a ~256-tool
+   ceiling, a ~40-tool ceiling contested against 80+, a profile key reported to hard-block — and
+   asserting any of them would eventually fail a correct server. A gate that fails correct servers
+   gets switched off, taking every true finding with it.
 
 If you find yourself adjusting an assertion because a consumer's server fails it, stop and read the
 citation. That is the moment the suite is doing its job.
@@ -39,8 +49,8 @@ citation. That is the moment the suite is doing its job.
 | Path | Contains | May import |
 |:---|:---|:---|
 | `src/target.ts` | The consumer contract — capabilities, not configuration | nothing |
-| `src/harness/` | Transport, browser, TLS authority, document host, OAuth + MCP clients, deployment lifecycle | Node, `oauth4webapi`, `vitest` |
-| `src/profiles/` | One file per client **surface**, transcribed from vendor docs | `src/harness/` only |
+| `src/harness/` | Transport, browser, TLS authority, document host, OAuth + MCP clients, deployment lifecycle, and the pure units the suites judge with | Node, `oauth4webapi`, `vitest` |
+| `src/profiles/` | One file per client **surface**, transcribed from vendor docs — OAuth behaviour, and the gate each surface applies to a tool list | `src/harness/` only |
 | `src/suites/` | The families and their suites | all of the above |
 | `src/provision.ts` | Run-start wiring, gated per capability | harness + target |
 
@@ -52,7 +62,11 @@ someone's constants back at them.
 - **MCT01 — A capability describes the SERVER, never the test.** `authorization` is a fact about a
   deployment; `runOAuthTests` would be a flag, and a flag is how a gate ends up silently skipped in
   the one repository that most needed it.
-- **MCT02 — One profile per client surface, never per vendor.** See `docs/extending.md`.
+- **MCT02 — One profile per client surface, never per vendor.** See `docs/extending.md`. This binds
+  both kinds in `src/profiles/`: an OAuth profile (how a client *authorizes* — behaviour the harness
+  executes) and a `ClientGate` row (what it does with a tool list it already has — published facts
+  nothing can execute). Claude Code and the hosted Claude surfaces disagree on both, so a `claude`
+  row in either would average two contracts into one describing neither.
 - **MCT03 — Adding a family never edits an existing one.** If it does, the seam is wrong; fix the
   seam.
 - **MCT04 — Prove the wire, not the handler** (toolkit MCP05). No suite may call a consumer's code
