@@ -52,6 +52,16 @@ const READ = "2026-08-14";
 const READ_STATELESS = "2026-08-29";
 
 /**
+ * When the vendor rows re-read in the 2026-09-05 sweep were last verified.
+ *
+ * A third stamp rather than a bulk edit of the other two, because that sweep moved a small number
+ * of vendor facts and left the rest standing. Sharing one date across all of them would claim a
+ * re-read that did not happen for the clauses it did not touch — and this file's whole value is
+ * that a `verified` date means somebody actually looked.
+ */
+const READ_VENDOR_SWEEP = "2026-09-05";
+
+/**
  * IETF clauses. These bind every OAuth client, so an assertion citing one of these belongs in the
  * shared spine rather than a vendor profile.
  */
@@ -352,9 +362,43 @@ export const MCP = Object.freeze({
   ),
   /** Tools, prompts, resources, templates and server identity may each carry `icons[]`. */
   ICONS: clause(
-    "MCP 2026-07-28 — Server Tools (`icons[]` with `src`, `mimeType`, `sizes`)",
+    "MCP 2026-07-28 — Server Tools (`icons[]` with `src`, `mimeType`, `sizes`, `theme`)",
     `${MCP_STATELESS}/server/tools`,
     READ_STATELESS,
+  ),
+  /**
+   * `theme` names the ground the artwork is drawn for, and **absent is not a default of light**:
+   * the schema's own words are that a client "should assume the icon can be used with any theme".
+   * `sizes` reads the same way, with `"any"` the sentinel for scalable formats.
+   */
+  ICON_THEME: clause(
+    "MCP 2026-07-28 — Schema (`Icon.theme` of `light` | `dark`, absent meaning any theme)",
+    `${MCP_STATELESS}/schema`,
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * **The specification states no rule for how a client chooses among several icons.**
+   *
+   * That silence is the whole constraint, and the reason the advice built on it is a hedge rather
+   * than a requirement: a server publishing only `light` and `dark` variants cannot rely on any
+   * client finding the one matching its ground. A client that ignores `theme`, or that simply takes
+   * the first renderable entry, draws whichever came first — turning a mark that was merely untuned
+   * into one drawn for the wrong ground, with no error and no fallback to report it.
+   */
+  ICON_SELECTION_UNSPECIFIED: clause(
+    "MCP 2026-07-28 — Schema (no rule is given for choosing among several `icons[]` entries)",
+    `${MCP_STATELESS}/schema`,
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * The extensions layer: a client declares extensions per request in
+   * `_meta["io.modelcontextprotocol/clientCapabilities"].extensions`, and a server declares them on
+   * `server/discover` under `capabilities.extensions`.
+   */
+  EXTENSIONS: clause(
+    "MCP Extensions — capability negotiation (`capabilities.extensions` on `server/discover`)",
+    "https://modelcontextprotocol.io/extensions",
+    READ_VENDOR_SWEEP,
   ),
   /**
    * Server identity — and with it `instructions` — rides the protocol's own metadata channel:
@@ -370,6 +414,116 @@ export const MCP = Object.freeze({
     "MCP 2026-07-28 — Release announcement (deprecation policy)",
     "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
     READ_STATELESS,
+  ),
+});
+
+/**
+ * WebMCP — the browser-side tool API, which is **not** the Model Context Protocol.
+ *
+ * **Read this before adding an assertion here.** WebMCP lets a page hand its own functions to an
+ * in-browser agent as typed tools. It borrows MCP's vocabulary — tools, descriptions, JSON Schema —
+ * and none of its wire: no JSON-RPC, no transport, no server, no OAuth. Nothing in {@link MCP}
+ * applies to it, and importing a rule across that gap is how a reader ends up carrying MCP's
+ * security model onto a surface that has none of its controls.
+ *
+ * **What this package can and cannot reach.** Only the *declarative* API — forms carrying
+ * `toolname` / `tooldescription` / `toolparamdescription` — is visible in served HTML, so it is the
+ * half that crosses a socket and the only half asserted here. The *imperative* API
+ * (`document.modelContext.registerTool`) is a JavaScript call in the user's tab; observing it needs
+ * a real browser running the origin trial, which this package does not ship. That gap is stated in
+ * every WebMCP suite rather than papered over, because a suite that silently checked nothing is
+ * exactly the failure this package exists to prevent.
+ *
+ * **The declarative half is the less finished half**, by the explainer's own account: input-schema
+ * synthesis is marked TBD, the response mechanism is "under debate", and `outputSchema` support and
+ * declarative visibility through `getTools()` are unresolved. So most of what this package has to
+ * say about it is advisory. Only what the specification *states* is asserted.
+ */
+export const WEBMCP = Object.freeze({
+  /** `ModelContextTool` requires `name` and `description`; the page's tools are per-`Document`. */
+  TOOL_SHAPE: clause(
+    "WebMCP — Draft Community Group Report (`ModelContextTool` requires `name` and `description`)",
+    "https://webmachinelearning.github.io/webmcp/",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * The declarative API: `toolname` and `tooldescription` on a form, `toolparamdescription` on each
+   * control, and validation attributes (`required`, `min`, `max`, `step`) becoming schema
+   * constraints.
+   */
+  DECLARATIVE_API: clause(
+    "WebMCP — Declarative API explainer (`toolname`, `tooldescription`, `toolparamdescription`)",
+    "https://github.com/webmachinelearning/webmcp/blob/main/declarative-api-explainer.md",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * `toolautosubmit` lets an agent submit a form without user review.
+   *
+   * That is a consent decision wearing the clothes of a convenience flag: the tool runs in the
+   * user's tab, in their live authenticated session, called by a model reading text it did not
+   * write.
+   */
+  AUTOSUBMIT_IS_CONSENT: clause(
+    "WebMCP — Declarative API explainer (`toolautosubmit` submits without user review)",
+    "https://github.com/webmachinelearning/webmcp/blob/main/declarative-api-explainer.md",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * The annotations are **hints**, and nothing requires an agent to honour any of them.
+   *
+   * `readOnlyHint` on a tool that writes is therefore not a mislabel; it is a shipped
+   * vulnerability. Set them honestly and design as though the agent ignores them.
+   */
+  HINTS_ARE_NOT_ENFORCEMENT: clause(
+    "WebMCP — Security and privacy questionnaire (annotations are hints, not guarantees)",
+    "https://github.com/webmachinelearning/webmcp/blob/main/security-privacy-questionnaire.md",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * Over-parameterization leaks: a tool asking for a non-minimal set of personal data causes
+   * leakage simply by being called.
+   */
+  MINIMAL_PARAMETERS: clause(
+    "WebMCP — Security and privacy questionnaire (ask for the least the operation needs)",
+    "https://github.com/webmachinelearning/webmcp/blob/main/security-privacy-questionnaire.md",
+    READ_VENDOR_SWEEP,
+  ),
+  /** Secure context, `tools` Permissions Policy defaulting to `self`, `exposedTo` widening it. */
+  EXPOSURE: clause(
+    "WebMCP — Chrome for Developers (secure context, `tools` Permissions Policy, `exposedTo`)",
+    "https://developer.chrome.com/docs/ai/webmcp",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * The object moved from `navigator.modelContext` to `document.modelContext`, deprecated in
+   * Chrome 150.0.7861.0 and still the spelling in much third-party writing. Feature-detect; never
+   * version-detect.
+   */
+  DOCUMENT_MODEL_CONTEXT: clause(
+    "WebMCP — `navigator` → `document` migration (webmcp#184)",
+    "https://github.com/webmachinelearning/webmcp/pull/184",
+    READ_VENDOR_SWEEP,
+  ),
+  /**
+   * How a browser is made to expose the API at all.
+   *
+   * Chrome states the flag and the origin trial: `chrome://flags/#enable-webmcp-testing` from
+   * 146.0.7672.0, and an origin trial from Chrome 149 (trial id `4163014905550602241`). Both are
+   * STRONG — Chrome's own documentation.
+   *
+   * **The command-line spelling of that flag is not in Chrome's documentation.** It is recorded by
+   * a testing vendor as `--enable-features=WebMCPTesting,DevToolsWebMCPSupport`, which is a single
+   * secondary source. The harness therefore uses it as a **default it can be overridden out of**,
+   * never as a fact it asserts — and it verifies the API is present before drawing any conclusion,
+   * so a wrong switch produces a named stop rather than a page reported as toolless.
+   *
+   * **Sources disagree on the testing surface's method name**, `getTools()` versus `listTools()`.
+   * The harness probes both and reports which answered rather than picking one.
+   */
+  CHROME_ENABLEMENT: clause(
+    "WebMCP — Chrome for Developers (the `#enable-webmcp-testing` flag and the Chrome 149 origin trial)",
+    "https://developer.chrome.com/docs/ai/webmcp",
+    READ_VENDOR_SWEEP,
   ),
 });
 
@@ -408,10 +562,18 @@ export const VENDOR = Object.freeze({
     "https://claude.ai/oauth/mcp-oauth-client-metadata",
     READ,
   ),
+  /**
+   * Re-read 2026-09-05, when the redirect-URI guidance was found to have been recorded backwards.
+   *
+   * The **stable** `https://chatgpt.com/connector_platform_oauth_redirect` is the *recommended*
+   * form for any authorization server that emits RFC 9207 `iss`; the per-connection
+   * `{callback_id}` form is the **fallback** for servers that do not. This package previously
+   * asserted the inverse, which is why the date moved on this clause alone.
+   */
   OPENAI_PLUGIN_AUTH: clause(
     "OpenAI — Plugins, Authentication",
     "https://developers.openai.com/plugins/build/auth",
-    READ,
+    READ_VENDOR_SWEEP,
   ),
   OPENAI_PLUGIN_BUILD: clause(
     "OpenAI — Plugins, Build an MCP server",

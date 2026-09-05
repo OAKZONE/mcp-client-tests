@@ -7,9 +7,18 @@
  *
  * | Family | Requires | Asks |
  * |:---|:---|:---|
+ * | `discovery` | — | Can a client find you and start? The `401`, the metadata documents, and the URLs they are derived from — no credential needed, so this is the one family a **remote** deployment can run. |
  * | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
  * | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates — `server/discover`, no session, caching hints, legal tool names, both error channels? |
+ * | `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states — described tools, unique names, consent kept out of an attribute? |
  * | `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules — described parameters, bounded results, actionable errors, no raw identifiers crossing out? |
+ *
+ * **The `webmcp` family asserts against a different specification from the rest.** WebMCP is the
+ * browser API that lets a page hand its own functions to an agent attached to the browser; it
+ * borrows MCP's vocabulary and none of its wire — no JSON-RPC, no transport, no server, no OAuth.
+ * It is a separate family rather than a branch inside `protocol` precisely because no MCP clause
+ * binds a tool published in a page, and mixing the two is how a reader carries MCP's security model
+ * onto a surface that has none of its controls.
  *
  * Two of those three require **no capability at all**, which is the point of the design: a server
  * with no authorization — or one written in another language whose consumer cannot express a
@@ -34,6 +43,11 @@
  */
 
 export {
+  defineDiscoveryConformanceSuites,
+  defineAuthorizationSurfaceSuite,
+} from "./discovery/index.js";
+
+export {
   defineOAuthConformanceSuites,
   defineClaudeDesktopSuite,
   defineClaudeCodeSuite,
@@ -44,3 +58,9 @@ export {
   defineProtocolConformanceSuites,
   defineWireConformanceSuite,
 } from "./protocol/index.js";
+
+export {
+  defineWebMcpConformanceSuites,
+  defineWebMcpDeclarativeSuite,
+  defineWebMcpImperativeSuite,
+} from "./webmcp/index.js";

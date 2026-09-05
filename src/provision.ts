@@ -21,7 +21,7 @@ import {
   startTargetDeployment,
   type RunningDeployment,
 } from "./harness/deployment.js";
-import type { McpTestTarget } from "./target.js";
+import { isRemoteDeployment, type McpTestTarget } from "./target.js";
 
 /** What a provisioned run consists of. */
 export interface ProvisionedRun {
@@ -43,6 +43,26 @@ export interface ProvisionedRun {
 export async function provisionMcpTestRun(
   target: McpTestTarget,
 ): Promise<ProvisionedRun> {
+  if (isRemoteDeployment(target.deployment) && target.authorization) {
+    // Refused rather than half-honoured. The OAuth families need to write an account holder into
+    // the server's own storage, and they need the server to fetch a client-metadata document from a
+    // loopback origin whose certificate authority it trusts — which is arranged by handing the
+    // process a CA at spawn. Neither is possible against a host this run did not start, so the
+    // combination would produce suites that fail for infrastructure reasons and read as findings.
+    throw new Error(
+      `Target "${target.id}" declares both a remote deployment and the authorization capability, ` +
+        "and this package cannot honour both at once.\n" +
+        "  The OAuth families create an account holder in the server's storage and require the " +
+        "server to trust a certificate authority minted for this run — both of which need the " +
+        "process to have been started here.\n" +
+        "  Two ways out:\n" +
+        "    1. Drop `authorization` and register `defineDiscoveryConformanceSuites(target)`, " +
+        "which asserts the whole authorization surface a client reads before it has a token.\n" +
+        "    2. Keep `authorization` and give the target a spawned `deployment`, which is how the " +
+        "OAuth families are meant to run — from inside the repository that owns the server.",
+    );
+  }
+
   const documentHost = target.authorization ? await startDocumentHost() : undefined;
   try {
     const { deployment, stop } = await startTargetDeployment(target, {
@@ -53,9 +73,10 @@ export async function provisionMcpTestRun(
 
     process.stdout.write(
       `\nmcp-client-tests: ${target.id} → ${deployment.canonicalOrigin} ` +
-        `(127.0.0.1:${deployment.appPort})` +
+        (deployment.remote ? "(remote — this run started nothing)" : `(127.0.0.1:${deployment.appPort})`) +
         (documentHost ? `, documents ${documentHost.origin}` : "") +
-        `\nmcp-client-tests: server log at ${deployment.logPath}\n\n`,
+        (deployment.remote ? "\n" : `\nmcp-client-tests: server log at ${deployment.logPath}\n`) +
+        "\n",
     );
 
     return {

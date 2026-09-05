@@ -57,9 +57,10 @@ import {
 } from "../../harness/oauth-client.js";
 import { IETF, MCP, VENDOR, cite } from "../../harness/specifications.js";
 import {
-  CHATGPT_LEGACY_REDIRECT_URI,
-  CHATGPT_REDIRECT_URI,
+  CHATGPT_PER_CONNECTION_REDIRECT_URI,
+  chatgptClientIdMetadataUrl,
   chatgptDesktopProfile,
+  chatgptRedirectUri,
 } from "../../profiles/chatgpt-desktop.js";
 import type { VendorProfile } from "../../harness/vendor-profile.js";
 
@@ -251,25 +252,50 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
       });
 
       expect(
-        completed.leg.callbackUrl.startsWith(CHATGPT_REDIRECT_URI),
+        completed.leg.callbackUrl.startsWith(CHATGPT_PER_CONNECTION_REDIRECT_URI),
         cite(
           VENDOR.OPENAI_PLUGIN_AUTH,
           `New ChatGPT connections use a per-connection redirect URI shaped as ` +
-            `${CHATGPT_REDIRECT_URI}; it must be allowlisted exactly and never wildcarded.`,
+            `${CHATGPT_PER_CONNECTION_REDIRECT_URI}; it must be allowlisted exactly and never wildcarded.`,
         ),
       ).toBe(true);
     });
 
-    it("does not depend on the legacy shared callback", () => {
-      const registered = profile.clientMetadata.redirect_uris as string[];
+    it("accepts the redirect form its own issuer identification earns", async () => {
+      // Corrected 2026-09-05. This assertion previously ran the other way round: it treated the
+      // stable `connector_platform_oauth_redirect` as a legacy path and failed a deployment that
+      // registered it. OpenAI documents the opposite — the stable URI is what ChatGPT *uses* once
+      // the authorization server emits RFC 9207 `iss`, and the per-connection `{callback_id}` form
+      // is the fallback for servers that do not.
+      //
+      // So which URI ChatGPT will send is decided by the server's own advertisement, and the
+      // failure this catches is a real one: a deployment that advertises `iss`, and therefore
+      // receives the stable redirect, but has never allowlisted it, is unreachable from ChatGPT
+      // while every document it serves looks healthy.
+      const advertises =
+        discovered.as.authorization_response_iss_parameter_supported === true;
+      const earned = chatgptRedirectUri(advertises);
+
+      const registered = await registerDynamicClient(target, discovered.as, {
+        client_name: "ChatGPT conformance (earned redirect)",
+        redirect_uris: [earned],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      });
+
       expect(
-        registered,
+        registered.redirect_uris,
         cite(
           VENDOR.OPENAI_PLUGIN_AUTH,
-          "The legacy shared callback survives only for already-published apps; a new integration " +
-            "that relies on it is depending on a compatibility path.",
+          `This deployment ${advertises ? "advertises" : "does not advertise"} RFC 9207 issuer ` +
+            `identification, so ChatGPT sends ${earned} — the ` +
+            `${advertises ? "stable redirect it has earned" : "per-connection fallback"}, with a ` +
+            `matching client-ID metadata document at ` +
+            `${chatgptClientIdMetadataUrl(advertises, "{callback_id}")}. It must be registrable ` +
+            "exactly, never guessed or wildcarded.",
         ),
-      ).not.toContain(CHATGPT_LEGACY_REDIRECT_URI);
+      ).toContain(earned);
     });
 
     it("keeps dynamic registration working alongside metadata documents", async () => {
@@ -278,7 +304,7 @@ describe.skipIf(!mcpTarget.authorization)("ChatGPT connector conformance", () =>
       // fallback.
       const registered = await registerDynamicClient(target, discovered.as, {
         client_name: "ChatGPT conformance (dynamic)",
-        redirect_uris: [CHATGPT_REDIRECT_URI],
+        redirect_uris: [CHATGPT_PER_CONNECTION_REDIRECT_URI],
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",

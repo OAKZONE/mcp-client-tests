@@ -26,8 +26,10 @@ export {
 } from "./claude-code.js";
 
 export {
-  CHATGPT_LEGACY_REDIRECT_URI,
-  CHATGPT_REDIRECT_URI,
+  CHATGPT_PER_CONNECTION_REDIRECT_URI,
+  CHATGPT_STABLE_REDIRECT_URI,
+  chatgptClientIdMetadataUrl,
   chatgptClientMetadata,
   chatgptDesktopProfile,
+  chatgptRedirectUri,
 } from "./chatgpt-desktop.js";

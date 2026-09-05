@@ -61,6 +61,27 @@ someone's constants back at them.
   tests (`src/harness/harness.test.ts`) exist for exactly this: a defect in `wellKnownInsertion` or
   `parseBearerChallenge` would make every consumer's suite assert the wrong thing quietly. When a new
   pure unit is added to the harness, it gets a test here.
+- **MCT06 — WebMCP is not MCP, and the two never share a clause.** WebMCP (`src/suites/webmcp/`,
+  `src/harness/webmcp-surface.ts`, the `WEBMCP` clause group) is the browser API that lets a page
+  register its own functions as tools for an agent attached to the browser. It borrows MCP's
+  vocabulary — tools, descriptions, JSON Schema — and none of its wire: no JSON-RPC, no transport,
+  no server, no OAuth. So an assertion about a page-published tool cites `WEBMCP`, never `MCP`, and
+  an MCP rule (tool-name grammar, caching hints, `resultType`) has no standing over one. The gap is
+  where the risk sits: a WebMCP tool runs in the user's tab, in a live authenticated session, with
+  no token and no scope, and its three annotations are **hints no agent must honour**. The
+  *declarative* API crosses a socket and is read from served HTML; the *imperative* API is a
+  JavaScript call, so it is reached only by `suites/webmcp/imperative.ts`, which drives a real
+  Chrome through `playwright-core` (an **optional peer dependency**, no binaries). That suite is
+  never auto-registered: `defineWebMcpConformanceSuites` omits it, because turning a consumer's run
+  red over a missing browser is neither a finding about their server nor something they asked for.
+
+- **MCT07 — A remote deployment can only be asked what needs no credential.** `deployment: { remote:
+  true }` names a server this package did not start, so there is no process to hand a certificate
+  authority to and no storage to create an account holder in. Only the `discovery` family qualifies;
+  `authorization` alongside a remote deployment is **refused in `provision.ts`**, not degraded. Do
+  not "make OAuth work remotely" by relaxing that — the document host exists because the server must
+  fetch a client-metadata document back over a trusted TLS chain, and a host you do not control
+  cannot be given one.
 
 ## QA gates
 

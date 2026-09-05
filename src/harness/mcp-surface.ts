@@ -239,6 +239,52 @@ export function publishedIcons(
     .filter((icon): icon is Record<string, unknown> => icon !== undefined);
 }
 
+/** The two grounds an icon may declare itself drawn for. */
+const ICON_THEMES = new Set(["light", "dark"]);
+
+/**
+ * Say why a published `icons[]` set would draw the wrong mark, given how clients actually choose.
+ *
+ * **The constraint is an absence, not a rule.** The specification defines `theme` as `light` or
+ * `dark` and says a client "should assume the icon can be used with any theme" when it is absent —
+ * but it states **no rule for how a client picks among several entries**. So a server publishing
+ * only tuned variants cannot rely on any client finding the one matching its ground: a client that
+ * ignores `theme`, or that simply takes the first renderable entry, draws whichever came first.
+ *
+ * That turns a mark which was merely *untuned* into one drawn *for the wrong ground*, with no
+ * error and no fallback — the same silent failure mode as an icon sourced off-authority. Publishing
+ * an untagged entry, first, is the hedge; it is advice rather than a requirement, because what it
+ * hedges against is the specification's silence.
+ *
+ * @param icons - The `icons[]` entries as published, in order.
+ * @returns What would go wrong, or undefined when the set is safe or empty.
+ */
+export function iconThemeCoverageProblem(
+  icons: readonly Record<string, unknown>[],
+): string | undefined {
+  if (icons.length === 0) return undefined;
+  const themeOf = (icon: Record<string, unknown>): string | undefined =>
+    typeof icon.theme === "string" && ICON_THEMES.has(icon.theme) ? icon.theme : undefined;
+  const untaggedIndex = icons.findIndex((icon) => themeOf(icon) === undefined);
+
+  if (untaggedIndex === -1) {
+    const declared = [...new Set(icons.map(themeOf))].join(", ");
+    return (
+      `publishes only theme-tagged entries (${declared}) and no untagged one — a client that ` +
+      "ignores `theme`, or that takes the first renderable entry, draws a mark tuned for the " +
+      "wrong ground, and nothing reports it"
+    );
+  }
+  if (untaggedIndex > 0) {
+    return (
+      `publishes an untagged entry at position ${untaggedIndex + 1}, behind ` +
+      `${untaggedIndex} theme-tagged ${untaggedIndex === 1 ? "entry" : "entries"} — a client ` +
+      "taking the first renderable entry never reaches the neutral mark"
+    );
+  }
+  return undefined;
+}
+
 /**
  * A result's `resultType`, from wherever it carries it.
  *

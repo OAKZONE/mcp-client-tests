@@ -164,14 +164,23 @@ const EXTENDED_KEY_USAGE_SERVER = extension(
  * Both the IP literal and `localhost` are present because the document origin is addressed by IP
  * while a future consumer of this harness may prefer the name, and a certificate that only covers
  * one of them fails hostname verification with an error that reads like a trust problem.
+ *
+ * Extra names are accepted because the WebMCP family fronts the deployment on its **canonical**
+ * host so a real browser sees the origin production serves. A certificate that omitted that name
+ * would fail hostname verification, which is a different error from the untrusted-root one that
+ * family deliberately accepts — and conflating the two is how a reader concludes the harness
+ * disables TLS verification wholesale.
+ *
+ * @param hostnames - Additional DNS names to cover, beyond `localhost`.
  */
-function subjectAlternativeName(): Buffer {
+function subjectAlternativeName(hostnames: readonly string[] = []): Buffer {
   return extension(
     "2.5.29.17",
     false,
     sequence(
       // dNSName [2] IMPLICIT IA5String
       implicitPrimitive(2, Buffer.from("localhost", "ascii")),
+      ...hostnames.map((hostname) => implicitPrimitive(2, Buffer.from(hostname, "ascii"))),
       // iPAddress [7] IMPLICIT OCTET STRING
       implicitPrimitive(7, Buffer.from([127, 0, 0, 1])),
     ),
@@ -224,9 +233,14 @@ export interface LoopbackTlsMaterial {
 /**
  * Mint a certificate authority and a loopback server certificate it signed.
  *
+ * @param hostnames - Extra DNS names the server certificate must cover, beyond `localhost` and the
+ *   loopback IP. The WebMCP family passes the deployment's canonical host so a real browser reaches
+ *   the origin production serves.
  * @returns The CA certificate and the server credential, all PEM encoded.
  */
-export function createLoopbackTlsMaterial(): LoopbackTlsMaterial {
+export function createLoopbackTlsMaterial(
+  hostnames: readonly string[] = [],
+): LoopbackTlsMaterial {
   const authority = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const server = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 
@@ -247,7 +261,7 @@ export function createLoopbackTlsMaterial(): LoopbackTlsMaterial {
       BASIC_CONSTRAINTS_LEAF,
       KEY_USAGE_LEAF,
       EXTENDED_KEY_USAGE_SERVER,
-      subjectAlternativeName(),
+      subjectAlternativeName(hostnames),
     ],
   });
 

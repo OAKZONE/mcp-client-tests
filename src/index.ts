@@ -29,8 +29,11 @@ export type {
   DeploymentRuntimeFacts,
   DeploymentSpec,
   McpTestTarget,
+  RemoteDeployment,
+  TargetDeployment,
+  WebMcpCapability,
 } from "./target.js";
-export { mcpServerUrl } from "./target.js";
+export { isRemoteDeployment, mcpServerUrl } from "./target.js";
 
 export { provisionMcpTestRun, type ProvisionedRun } from "./provision.js";
 
@@ -46,10 +49,37 @@ export {
   IETF,
   MCP,
   VENDOR,
+  WEBMCP,
   cite,
   offers,
   type SpecificationClause,
 } from "./harness/specifications.js";
+
+export {
+  openWebMcpBrowser,
+  startCanonicalProxy,
+  WEBMCP_LAUNCH_ARGS,
+  type CanonicalProxy,
+  type RegisteredToolReading,
+  type RegisteredWebMcpTool,
+  type WebMcpBrowserOptions,
+  type WebMcpBrowserSession,
+} from "./harness/webmcp-browser.js";
+
+export {
+  declarativeToolProblem,
+  declarativeWebMcpTools,
+  duplicateDeclarativeToolNames,
+  imperativeRegistrationStyle,
+  inlineScriptText,
+  scriptSources,
+  triageScriptUrls,
+  undescribedParameters,
+  type DeclarativeWebMcpParameter,
+  type DeclarativeWebMcpTool,
+  type ImperativeRegistrationStyle,
+  type ScriptUrlTriage,
+} from "./harness/webmcp-surface.js";
 
 export {
   advise,

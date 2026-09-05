@@ -49,6 +49,7 @@ import {
   advertisedVersions,
   duplicateToolNames,
   iconSourcingProblem,
+  iconThemeCoverageProblem,
   inputSchemaProblem,
   publishedIcons,
   readCachingHints,
@@ -310,6 +311,35 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
             "no error, no fallback, just the default. Serve it from this origin, or inline it as a " +
             "`data:` URI, which is accepted from any server.",
           source: VENDOR.MICROSOFT_VSCODE_MCP,
+        });
+      }
+
+      // Theme coverage is checked per owner rather than across the whole run, because "publish an
+      // untagged entry first" is a property of one `icons[]` array — pooling every server and tool
+      // icon into one list would invent a neighbouring entry that no client ever sees together.
+      const themeTrapped = [
+        { owner: "server identity", icons: serverIcons },
+        ...tools.map((tool, index) => ({
+          owner: `tool \`${toolNames[index]}\``,
+          icons: publishedIcons(tool),
+        })),
+      ]
+        .map(({ owner, icons }) => {
+          const problem = iconThemeCoverageProblem(icons);
+          return problem ? `${owner} ${problem}` : undefined;
+        })
+        .filter((entry): entry is string => entry !== undefined);
+      if (themeTrapped.length > 0) {
+        advise(SCOPE, {
+          subject: "icon themes",
+          finding: themeTrapped.join("; "),
+          consequence:
+            "`theme` is a hint about the ground artwork was drawn for, and absent means *any* " +
+            "ground — but the specification never says how a client chooses among several " +
+            "entries, so a tagged-only set is a bet that every client reads `theme`. Publish the " +
+            "neutral mark too, and put it first: it costs one array entry and it is what a client " +
+            "that ignores `theme` will draw.",
+          source: MCP.ICON_SELECTION_UNSPECIFIED,
         });
       }
     }

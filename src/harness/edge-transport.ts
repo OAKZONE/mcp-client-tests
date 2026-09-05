@@ -24,6 +24,7 @@
  */
 
 import { request as httpRequest, type OutgoingHttpHeaders } from "node:http";
+import { request as httpsRequest } from "node:https";
 
 /** One HTTP exchange, unmodified. */
 export interface WireResponse {
@@ -43,8 +44,19 @@ export interface WireResponse {
 export interface EdgeTarget {
   /** The origin the client believes it is talking to, e.g. `https://kwantle.test`. */
   readonly canonicalOrigin: string;
-  /** The loopback port the application process listens on. */
+  /** The loopback port the application process listens on. Unused when {@link remote} is set. */
   readonly appPort: number;
+  /**
+   * Whether the canonical origin is a real host to dial rather than a loopback port to proxy onto.
+   *
+   * **The proxy translation is not skipped so much as it is already real.** Against a spawned
+   * deployment this module *is* the reverse proxy: it dials loopback and supplies the `Host` and
+   * forwarded headers a proxy would add. A remote deployment has its own proxy in front of it, so
+   * supplying a second set of forwarded headers would be describing a hop that did not happen —
+   * and `Host` is the real host by construction. The request therefore goes out as an ordinary
+   * client's would, which is exactly what the assertions on that surface are about.
+   */
+  readonly remote?: boolean;
 }
 
 export interface EdgeRequestInit {
@@ -93,15 +105,19 @@ export function edgeRequest(
   }
 
   const canonical = new URL(target.canonicalOrigin);
-  const headers: OutgoingHttpHeaders = {
-    // Preserved from the client's request, exactly as a reverse proxy preserves it. The MCP
-    // endpoint compares this against its configured canonical host.
-    host: canonical.host,
-    "x-forwarded-proto": canonical.protocol.replace(":", ""),
-    "x-forwarded-host": canonical.host,
-    "x-forwarded-for": FORWARDED_FOR,
-    connection: "close",
-  };
+  // A remote deployment already sits behind its own proxy, so the forwarded set is omitted: adding
+  // one would describe a hop that did not happen, and `Host` is the real host by construction.
+  const headers: OutgoingHttpHeaders = target.remote
+    ? { connection: "close" }
+    : {
+        // Preserved from the client's request, exactly as a reverse proxy preserves it. The MCP
+        // endpoint compares this against its configured canonical host.
+        host: canonical.host,
+        "x-forwarded-proto": canonical.protocol.replace(":", ""),
+        "x-forwarded-host": canonical.host,
+        "x-forwarded-for": FORWARDED_FOR,
+        connection: "close",
+      };
   for (const [name, value] of Object.entries(init.headers ?? {})) {
     headers[normalizeHeaderName(name)] = value;
   }
@@ -113,11 +129,15 @@ export function edgeRequest(
         : Buffer.from(init.body, "utf8");
   if (body) headers["content-length"] = String(body.byteLength);
 
+  const secure = target.remote === true && canonical.protocol === "https:";
+  const send = secure ? httpsRequest : httpRequest;
   return new Promise<WireResponse>((resolve, reject) => {
-    const outgoing = httpRequest(
+    const outgoing = send(
       {
-        host: "127.0.0.1",
-        port: target.appPort,
+        host: target.remote ? canonical.hostname : "127.0.0.1",
+        port: target.remote
+          ? (canonical.port === "" ? (secure ? 443 : 80) : Number(canonical.port))
+          : target.appPort,
         method: (init.method ?? "GET").toUpperCase(),
         path: `${parsed.pathname}${parsed.search}`,
         headers,

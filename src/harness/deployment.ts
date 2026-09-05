@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { edgeRequest, type EdgeTarget } from "./edge-transport.js";
-import type { McpTestTarget } from "../target.js";
+import { isRemoteDeployment, type McpTestTarget, type RemoteDeployment } from "../target.js";
 
 /** Everything a worker needs to drive the running deployment. */
 export interface RunningDeployment {
@@ -37,6 +37,8 @@ export interface RunningDeployment {
   readonly canonicalOrigin: string;
   readonly mcpPath: string;
   readonly appPort: number;
+  /** Whether the canonical origin is a real host, rather than a loopback port this run started. */
+  readonly remote?: boolean;
   /** Loopback HTTPS origin the SERVER fetches client documents from, when one was started. */
   readonly documentOrigin?: string;
   /** Plain-HTTP control origin a worker publishes documents through. */
@@ -107,6 +109,7 @@ export function edgeTargetFor(deployment: RunningDeployment): EdgeTarget {
   return {
     canonicalOrigin: deployment.canonicalOrigin,
     appPort: deployment.appPort,
+    remote: deployment.remote,
   };
 }
 
@@ -162,6 +165,57 @@ export interface DeploymentStartOptions {
  * @returns The deployment facts and a teardown that stops the process.
  * @throws Error when the preflight refuses, or the process exits or never becomes ready.
  */
+/**
+ * Register an already-running server as this run's deployment.
+ *
+ * There is nothing to spawn and nothing to stop, but every suite reads the same handoff file, so
+ * one is written — with `remote` set, which is what tells the transport to dial the real host
+ * instead of a loopback port.
+ *
+ * @param target - The MCP server under test.
+ * @param spec - The remote deployment declaration.
+ * @returns The registered deployment and a no-op stop.
+ * @throws Error when the host cannot be reached at all, naming the probe — because every assertion
+ *   failing for one unstated reason is the least useful shape a run can take.
+ */
+async function startRemoteDeployment(
+  target: McpTestTarget,
+  spec: RemoteDeployment,
+): Promise<{
+  readonly deployment: RunningDeployment;
+  readonly stop: () => Promise<void>;
+}> {
+  const deployment: RunningDeployment = {
+    targetId: target.id,
+    canonicalOrigin: target.canonicalOrigin,
+    mcpPath: target.mcpPath,
+    appPort: 0,
+    remote: true,
+    // No process, so no log to tail. Named rather than omitted so a reader of the handoff sees why.
+    logPath: "(remote deployment — this run started no process)",
+  };
+
+  const probePath = spec.readyPath ?? target.mcpPath;
+  const probeUrl = `${target.canonicalOrigin}${probePath}`;
+  try {
+    // Any status is reachable: a `401` is the healthiest answer an MCP endpoint gives an
+    // unauthenticated probe, so only a transport failure counts as unreachable here.
+    await edgeRequest(edgeTargetFor(deployment), probeUrl, { method: "GET" });
+  } catch (error) {
+    throw new Error(
+      `The remote deployment for "${target.id}" could not be reached at ${probeUrl}.
+` +
+        `  ${error instanceof Error ? error.message : String(error)}
+` +
+        "  Nothing was started — this target declares `deployment: { remote: true }`, so the " +
+        "server is expected to already be serving that origin.",
+    );
+  }
+
+  writeFileSync(deploymentHandoffPath(target.id), JSON.stringify(deployment), "utf8");
+  return { deployment, stop: async () => {} };
+}
+
 export async function startTargetDeployment(
   target: McpTestTarget,
   options: DeploymentStartOptions = {},
@@ -169,6 +223,10 @@ export async function startTargetDeployment(
   readonly deployment: RunningDeployment;
   readonly stop: () => Promise<void>;
 }> {
+  if (isRemoteDeployment(target.deployment)) {
+    return startRemoteDeployment(target, target.deployment);
+  }
+
   const refusal = target.deployment.preflight?.();
   if (refusal) throw new Error(refusal);
 

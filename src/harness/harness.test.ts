@@ -12,6 +12,10 @@
  * reporting its own bugs as somebody else's.
  */
 
+import { createServer } from "node:http";
+import { request as httpsRequest } from "node:https";
+import type { AddressInfo } from "node:net";
+
 import { describe, expect, it } from "vitest";
 
 import { advise, formatAdvisories, takeAdvisories } from "./advisory.js";
@@ -26,6 +30,7 @@ import {
   advertisedVersions,
   duplicateToolNames,
   iconSourcingProblem,
+  iconThemeCoverageProblem,
   inputSchemaProblem,
   publishedIcons,
   readCachingHints,
@@ -34,6 +39,23 @@ import {
   SERVER_INFO_META_KEY,
   toolNameProblem,
 } from "./mcp-surface.js";
+import {
+  CHATGPT_PER_CONNECTION_REDIRECT_URI,
+  CHATGPT_STABLE_REDIRECT_URI,
+  chatgptClientIdMetadataUrl,
+  chatgptRedirectUri,
+} from "../profiles/chatgpt-desktop.js";
+import {
+  declarativeToolProblem,
+  declarativeWebMcpTools,
+  duplicateDeclarativeToolNames,
+  imperativeRegistrationStyle,
+  inlineScriptText,
+  scriptSources,
+  triageScriptUrls,
+  undescribedParameters,
+} from "./webmcp-surface.js";
+import { startCanonicalProxy } from "./webmcp-browser.js";
 import { createLoopbackTlsMaterial } from "./tls-certificate.js";
 import { wellKnownInsertion } from "./vendor-profile.js";
 import { cite, offers, IETF, MCP } from "./specifications.js";
@@ -379,6 +401,382 @@ describe("iconSourcingProblem", () => {
   it("reports a `file://` icon on an HTTP server, where it is offered to stdio servers only", () => {
     expect(iconSourcingProblem("file:///icons/x.png", "https://mcp.example.com")).toContain(
       "stdio",
+    );
+  });
+});
+
+describe("iconThemeCoverageProblem", () => {
+  it("accepts a single untagged icon, which the spec says suits any theme", () => {
+    expect(iconThemeCoverageProblem([{ src: "a" }])).toBeUndefined();
+  });
+
+  it("accepts an untagged entry published first, ahead of its tuned variants", () => {
+    expect(
+      iconThemeCoverageProblem([
+        { src: "neutral" },
+        { src: "light", theme: "light" },
+        { src: "dark", theme: "dark" },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("reports a tagged-only set, where a client ignoring `theme` draws the wrong ground", () => {
+    const problem = iconThemeCoverageProblem([
+      { src: "light", theme: "light" },
+      { src: "dark", theme: "dark" },
+    ]);
+
+    expect(problem).toContain("no untagged one");
+    expect(problem).toContain("light");
+    expect(problem).toContain("dark");
+  });
+
+  it("reports an untagged entry a client taking the first renderable one never reaches", () => {
+    expect(
+      iconThemeCoverageProblem([{ src: "dark", theme: "dark" }, { src: "neutral" }]),
+    ).toContain("position 2");
+  });
+
+  it("says nothing about a surface that publishes no icons at all", () => {
+    // Absent icons are the `icons` advisory's subject, not this one's — reporting both would
+    // charge a server twice for one omission.
+    expect(iconThemeCoverageProblem([])).toBeUndefined();
+  });
+
+  it("treats an unrecognised `theme` value as untagged rather than as a third ground", () => {
+    // The schema names `light` and `dark` only. An entry claiming anything else cannot be relied
+    // on to be selected for a ground, so it counts as the neutral mark rather than a tuned one.
+    expect(iconThemeCoverageProblem([{ src: "a", theme: "sepia" }])).toBeUndefined();
+  });
+});
+
+describe("declarativeWebMcpTools", () => {
+  // The explainer's own sample, verbatim in shape: a form whose attributes make it a tool.
+  const searchCars = `
+    <form toolname="search-cars" tooldescription="Perform a car make/model search">
+      <input type="text" name="make" toolparamdescription="The vehicle's make" required>
+      <input type="text" name="model" toolparamdescription="The vehicle's model" required>
+      <button type="submit">Search</button>
+    </form>`;
+
+  it("reads a tool's name, description, and described parameters off the markup", () => {
+    const [tool] = declarativeWebMcpTools(searchCars);
+
+    expect(tool.name).toBe("search-cars");
+    expect(tool.description).toBe("Perform a car make/model search");
+    expect(tool.parameters.map((parameter) => parameter.name)).toEqual(["make", "model"]);
+    expect(tool.parameters[0].description).toBe("The vehicle's make");
+    expect(tool.parameters[0].required).toBe(true);
+  });
+
+  it("does not count the submit button as a parameter", () => {
+    // A `<button type=submit>` carries no `name` here, but a named submit input would — and it is
+    // the trigger, not an argument the model fills.
+    const [tool] = declarativeWebMcpTools(
+      `<form toolname="t" tooldescription="d">
+         <input type="text" name="q" toolparamdescription="query">
+         <input type="submit" name="go" value="Go">
+       </form>`,
+    );
+
+    expect(tool.parameters.map((parameter) => parameter.name)).toEqual(["q"]);
+  });
+
+  it("ignores an ordinary form, which is not a tool", () => {
+    expect(declarativeWebMcpTools(`<form action="/login"><input name="user"></form>`)).toEqual([]);
+  });
+
+  it("keeps each form's controls with its own tool", () => {
+    const tools = declarativeWebMcpTools(
+      `<form toolname="a" tooldescription="A"><input name="x"></form>
+       <form toolname="b" tooldescription="B"><input name="y"></form>`,
+    );
+
+    expect(tools.map((tool) => tool.name)).toEqual(["a", "b"]);
+    expect(tools[0].parameters.map((parameter) => parameter.name)).toEqual(["x"]);
+    expect(tools[1].parameters.map((parameter) => parameter.name)).toEqual(["y"]);
+  });
+
+  it("associates a control laid out away from its form by `form=`", () => {
+    // HTML associates by `form=<id>` as well as by nesting, and a page that lays a control out
+    // elsewhere still submits it — so a parser that only reads nesting under-reports the surface.
+    const [tool] = declarativeWebMcpTools(
+      `<form id="f" toolname="t" tooldescription="d"><input name="inside"></form>
+       <input name="outside" form="f" toolparamdescription="also submitted">`,
+    );
+
+    expect(tool.parameters.map((parameter) => parameter.name)).toEqual(["inside", "outside"]);
+  });
+
+  it("does not count a nested control twice when it also names its own form", () => {
+    const [tool] = declarativeWebMcpTools(
+      `<form id="f" toolname="t" tooldescription="d"><input name="x" form="f"></form>`,
+    );
+
+    expect(tool.parameters.map((parameter) => parameter.name)).toEqual(["x"]);
+  });
+
+  it("reads `toolautosubmit` and the validation attributes that become schema constraints", () => {
+    const [tool] = declarativeWebMcpTools(
+      `<form toolname="t" tooldescription="d" toolautosubmit>
+         <input type="number" name="qty" min="1" max="9" step="1">
+       </form>`,
+    );
+
+    expect(tool.autoSubmit).toBe(true);
+    expect(tool.parameters[0].kind).toBe("number");
+    expect(tool.parameters[0].constraints).toEqual({ min: "1", max: "9", step: "1" });
+  });
+
+  it("reads attribute names case-insensitively, as HTML defines them", () => {
+    const [tool] = declarativeWebMcpTools(`<form toolName="t" toolDescription="d"></form>`);
+
+    expect(tool.name).toBe("t");
+    expect(tool.description).toBe("d");
+  });
+});
+
+describe("declarativeToolProblem", () => {
+  it("accepts a tool carrying both the fields the IDL requires", () => {
+    expect(
+      declarativeToolProblem({ name: "t", description: "d", autoSubmit: false, parameters: [] }),
+    ).toBeUndefined();
+  });
+
+  it("reports a tool published with a name and nothing to choose it by", () => {
+    expect(
+      declarativeToolProblem({ name: "t", description: undefined, autoSubmit: false, parameters: [] }),
+    ).toContain("tooldescription");
+  });
+});
+
+describe("undescribedParameters and duplicateDeclarativeToolNames", () => {
+  it("names the parameters a model would have to guess the meaning of", () => {
+    const [tool] = declarativeWebMcpTools(
+      `<form toolname="t" tooldescription="d">
+         <input name="described" toolparamdescription="what it is">
+         <input name="bare">
+       </form>`,
+    );
+
+    expect(undescribedParameters(tool)).toEqual(["bare"]);
+  });
+
+  it("reports a name two forms in one document both claim", () => {
+    const tools = declarativeWebMcpTools(
+      `<form toolname="dup" tooldescription="a"></form><form toolname="dup" tooldescription="b"></form>`,
+    );
+
+    expect(duplicateDeclarativeToolNames(tools)).toEqual(["dup"]);
+  });
+});
+
+describe("imperativeRegistrationStyle", () => {
+  // Guards the migration that breaks registration silently: the object moved from `navigator` to
+  // `document`, and the old spelling is an alias Chrome plans to remove.
+  it("reports the current spelling", () => {
+    expect(imperativeRegistrationStyle("document.modelContext.registerTool({})")).toBe("document");
+  });
+
+  it("reports the deprecated spelling used alone", () => {
+    expect(imperativeRegistrationStyle("navigator.modelContext.registerTool({})")).toBe("navigator");
+  });
+
+  it("reports the feature-detected form that reads both", () => {
+    expect(
+      imperativeRegistrationStyle("const m = document.modelContext ?? navigator.modelContext;"),
+    ).toBe("both");
+  });
+
+  it("reports nothing for a page that registers nothing it can see", () => {
+    expect(imperativeRegistrationStyle("console.log('hello')")).toBe("none");
+  });
+
+  it("does not match a lookalike identifier", () => {
+    // `myDocument.modelContext` is a different object; matching it would advise against a spelling
+    // the page never used.
+    expect(imperativeRegistrationStyle("myDocument.modelContextFoo")).toBe("none");
+  });
+});
+
+describe("inlineScriptText and scriptSources", () => {
+  const page = `<script src="/app.js"></script><script>document.modelContext.registerTool({})</script>`;
+
+  it("concatenates inline script bodies and leaves external ones to the caller", () => {
+    expect(inlineScriptText(page)).toContain("registerTool");
+    expect(scriptSources(page)).toEqual(["/app.js"]);
+  });
+});
+
+describe("triageScriptUrls", () => {
+  const page = "https://app.example.test/dashboard";
+
+  it("resolves relative and root-relative sources onto the page's origin", () => {
+    expect(
+      triageScriptUrls(
+        `<script src="/static/app.js"></script><script src="chunk.js"></script>`,
+        page,
+      ).sameOrigin,
+    ).toEqual([
+      "https://app.example.test/static/app.js",
+      // Resolved against `/dashboard`, which has no trailing slash, so the last segment is
+      // replaced rather than appended to — the same rule the browser applies.
+      "https://app.example.test/chunk.js",
+    ]);
+  });
+
+  it("blocks an undeclared cross-origin bundle instead of fetching it", () => {
+    // Fetching it would pull a third party's CDN into a consumer's CI on every run, and risk
+    // reporting a finding about somebody else's code as a finding about theirs.
+    const triage = triageScriptUrls(`<script src="https://cdn.example.net/app.js"></script>`, page);
+
+    expect(triage.allowed).toEqual([]);
+    expect(triage.blocked).toEqual(["https://cdn.example.net/app.js"]);
+  });
+
+  it("allows a cross-origin bundle whose origin the deployment declared", () => {
+    const triage = triageScriptUrls(
+      `<script src="https://cdn.example.net/app.js"></script>`,
+      page,
+      ["https://cdn.example.net"],
+    );
+
+    expect(triage.allowed).toEqual(["https://cdn.example.net/app.js"]);
+    expect(triage.blocked).toEqual([]);
+  });
+
+  it("matches a declared origin written with a path or a trailing slash", () => {
+    // A consumer writing the origin as they see it in a browser bar should not silently get a
+    // blocked bundle and an advisory about their own CDN.
+    expect(
+      triageScriptUrls(`<script src="https://cdn.example.net/a.js"></script>`, page, [
+        "https://cdn.example.net/assets/",
+      ]).allowed,
+    ).toEqual(["https://cdn.example.net/a.js"]);
+  });
+
+  it("declares one origin without allowing another on the same host", () => {
+    // Scheme and port are part of an origin; a declaration must not widen past what was named.
+    const triage = triageScriptUrls(
+      `<script src="http://cdn.example.net/a.js"></script>`,
+      page,
+      ["https://cdn.example.net"],
+    );
+
+    expect(triage.allowed).toEqual([]);
+    expect(triage.blocked).toEqual(["http://cdn.example.net/a.js"]);
+  });
+
+  it("blocks everything when a declared origin is malformed, rather than throwing", () => {
+    const triage = triageScriptUrls(`<script src="https://cdn.example.net/a.js"></script>`, page, [
+      "not-an-origin",
+    ]);
+
+    expect(triage.blocked).toEqual(["https://cdn.example.net/a.js"]);
+  });
+
+  it("keeps an absolute same-origin URL", () => {
+    expect(
+      triageScriptUrls(`<script src="https://app.example.test/a.js"></script>`, page).sameOrigin,
+    ).toEqual(["https://app.example.test/a.js"]);
+  });
+
+  it("returns one entry for a bundle listed twice", () => {
+    expect(
+      triageScriptUrls(`<script src="/a.js"></script><script src="/a.js"></script>`, page)
+        .sameOrigin,
+    ).toEqual(["https://app.example.test/a.js"]);
+  });
+
+  it("skips a `src` the URL parser rejects rather than taking the run down", () => {
+    const triage = triageScriptUrls(`<script src="http://["></script>`, page);
+
+    expect([...triage.sameOrigin, ...triage.allowed, ...triage.blocked]).toEqual([]);
+  });
+
+  it("ignores an inline script, which has no `src` to follow", () => {
+    expect(triageScriptUrls(`<script>var a = 1;</script>`, page).sameOrigin).toEqual([]);
+  });
+});
+
+/**
+ * Dial the proxy over TLS, accepting its per-run certificate.
+ *
+ * `node:https` rather than `fetch`, because the global fetch has no supported way to relax
+ * certificate verification without pulling `undici` in as a real dependency.
+ */
+function getStatus(port: number, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(
+      { host: "127.0.0.1", port, path, rejectUnauthorized: false },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+describe("startCanonicalProxy", () => {
+  // A defect here would show the browser a different page from the one production serves, and the
+  // resulting finding would be reported against the consumer's deployment. Round-tripped against a
+  // real listener rather than asserted on the construction.
+  it("forwards to the application with the canonical host and forwarded headers", async () => {
+    const seen: { host?: string; proto?: string; url?: string } = {};
+    const application = createServer((request, response) => {
+      seen.host = request.headers.host;
+      seen.proto = request.headers["x-forwarded-proto"] as string;
+      seen.url = request.url;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<html>ok</html>");
+    });
+    await new Promise<void>((resolve) => application.listen(0, "127.0.0.1", resolve));
+    const appPort = (application.address() as AddressInfo).port;
+
+    const proxy = await startCanonicalProxy("https://app.example.test", appPort);
+    try {
+      // The certificate covers `app.example.test`, not the IP this test dials; the proxy's own
+      // contract is the header rewrite, which is what is under test here.
+      const status = await getStatus(proxy.port, "/dashboard");
+
+      expect(status).toBe(200);
+      expect(seen.host).toBe("app.example.test");
+      expect(seen.proto).toBe("https");
+      expect(seen.url).toBe("/dashboard");
+    } finally {
+      await proxy.close();
+      await new Promise<void>((resolve) => application.close(() => resolve()));
+    }
+  });
+
+  it("answers 502 rather than dying when the application is not listening", async () => {
+    const proxy = await startCanonicalProxy("https://app.example.test", 1);
+    try {
+      expect(await getStatus(proxy.port, "/")).toBe(502);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+describe("chatgptRedirectUri", () => {
+  // Guards the correction of 2026-09-05: these two were recorded the wrong way round, with the
+  // stable URI described as legacy and asserted against. A regression here would put the package
+  // back to failing deployments for doing the recommended thing.
+  it("uses the stable redirect when the server identifies itself per RFC 9207", () => {
+    expect(chatgptRedirectUri(true)).toBe(CHATGPT_STABLE_REDIRECT_URI);
+  });
+
+  it("falls back to the per-connection callback when it does not", () => {
+    expect(chatgptRedirectUri(false)).toBe(CHATGPT_PER_CONNECTION_REDIRECT_URI);
+  });
+
+  it("splits the client-ID metadata document on the same condition", () => {
+    expect(chatgptClientIdMetadataUrl(true, "abc")).toBe("https://chatgpt.com/oauth/client.json");
+    expect(chatgptClientIdMetadataUrl(false, "abc")).toBe(
+      "https://chatgpt.com/oauth/abc/client.json",
     );
   });
 });

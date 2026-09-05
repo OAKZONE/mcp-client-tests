@@ -1,5 +1,211 @@
 # Changelog
 
+## v0.7.0 — WebMCP joins as a family of its own, driven in a real browser, and a redirect fact we had backwards is corrected
+
+Two unrelated things, both worth a consumer's attention before bumping.
+
+**A vendor fact was recorded inverted, and a passing test was enforcing it.** This package described
+ChatGPT's stable OAuth redirect as a legacy path and asserted that a deployment should *not* depend
+on it. OpenAI documents the opposite. A consumer that did the recommended thing had a red test for
+it; a consumer that read our docstring was steered onto the fallback. That is exactly the failure
+mode this package exists to prevent, so it is called out first.
+
+**WebMCP is now a family**, and it is deliberately not folded into the MCP ones.
+
+### Fixed — the ChatGPT redirect URI, which was the wrong way round
+
+`https://chatgpt.com/connector_platform_oauth_redirect` is the **recommended** form, not a legacy
+one: *"If your authorization server meets those requirements, ChatGPT uses the stable redirect URI
+…"* The requirement is RFC 9207 issuer identification — returning `iss` on the authorization
+response. The per-connection `https://chatgpt.com/connector/oauth/{callback_id}` form is the
+**fallback**, for servers that do not. The matching CIMD client ids follow the same split:
+`https://chatgpt.com/oauth/client.json` with `iss`, `https://chatgpt.com/oauth/{callback_id}/client.json`
+without.
+
+- `CHATGPT_LEGACY_REDIRECT_URI` → **`CHATGPT_STABLE_REDIRECT_URI`**, and `CHATGPT_REDIRECT_URI` →
+  **`CHATGPT_PER_CONNECTION_REDIRECT_URI`**. Both old names are gone rather than aliased, because an
+  alias called `LEGACY` would keep teaching the inverted fact.
+- New `chatgptRedirectUri(emitsIss)` and `chatgptClientIdMetadataUrl(emitsIss, callbackId)` express
+  the split as data.
+- **The test `"does not depend on the legacy shared callback"` is replaced.** It failed a deployment
+  for registering the recommended URI. In its place: the suite reads your own
+  `authorization_response_iss_parameter_supported` advertisement and checks that the redirect form
+  ChatGPT would therefore send is registrable exactly. **A consumer that was green may now be red
+  here** — and if so it is a real finding: a server advertising `iss` receives the stable redirect
+  and is unreachable from ChatGPT if it has never allowlisted it.
+
+### Added — the `discovery` family, and remote targets
+
+`defineDiscoveryConformanceSuites(target)` asserts the authorization surface a client reads **before
+it has a token**: the `401` challenge, the protected-resource document, the authorization-server
+document, and the URLs a client derives to reach them.
+
+It requires no capability and no credential, which is what makes the second half possible: a target
+may now declare `deployment: { remote: true }` instead of a `DeploymentSpec`, naming a server that is
+**already running**. Point it at staging or production. Nothing is spawned, nothing is written, and
+the only requests made are the ones an unauthenticated client makes anyway.
+
+**Fails on:** an unauthenticated call that is not a transport-level `401`; a challenge with no
+`resource_metadata` pointer; an invalid token not answered `invalid_token`; protected-resource
+metadata absent from a derived URL; the authorization-server document absent from the RFC 8414
+**inserted** path; an `issuer` that does not match the URL it came from; a missing `S256`.
+
+**Advises on:** `offline_access` in the protected-resource document instead of the
+authorization-server one (the most common reason refresh silently never happens), CIMD advertised
+without both election conditions, a missing RFC 9207 `iss`, no registration path at all, an
+append-shaped discovery alias no client derives, and an origin-level authorization-server document
+that names a path-bearing issuer — which RFC 8414 §3.3 requires a client to refuse, so it cannot be
+used even by accident.
+
+**And one standing advisory every run:** discovery being correct is not authorization working. A
+clean report means a client can find you and start; it is not evidence the flow completes.
+
+**A remote target may not declare `authorization`.** The OAuth families write an account holder into
+the server's storage and need the server to trust a per-run certificate authority — both of which
+require this package to have started the process. The combination is refused with both ways out
+named rather than half-honoured, because suites failing for infrastructure reasons read as findings.
+
+### Added — the `webmcp` family
+
+`defineWebMcpConformanceSuites(target)`, gated on a new **`webMcp`** capability naming the pages that
+publish tools (`toolPages`, plus an optional `viewerCookie` for pages behind a session).
+
+**WebMCP is not MCP**, and the family is separate for that reason rather than for tidiness. It is the
+W3C draft that lets a page register its own functions as typed tools for an agent attached to the
+browser; it borrows MCP's vocabulary and none of its wire — no JSON-RPC, no transport, no server, no
+OAuth. A tool registered this way runs in the user's tab, in their live authenticated session, with
+no token, no scope and no consent step of its own. No assertion in this family cites an MCP clause,
+and mixing the two is how a reader carries MCP's security model onto a surface that has none of its
+controls.
+
+**What it proves over the wire**, from the served HTML of each declared page:
+
+- **Every declarative tool carries the `description` the IDL requires.** `ModelContextTool` requires
+  `name` and `description`; a form with `toolname` and no `tooldescription` asks a model to choose it
+  on the name alone.
+- **Tool names are unique within a document.** Tools are registered per `Document`, so two forms
+  claiming one name leave the agent unable to address either predictably.
+
+**What it advises**, with the clause that offers it — none of it fails a run:
+
+- Parameters with no `toolparamdescription`, which leave the model inferring meaning from a form-field
+  name and filling it confidently and wrongly.
+- `toolautosubmit`, which is a consent decision wearing the clothes of a convenience flag.
+- Over-parameterization, which leaks by the tool being *called*, not by being misused.
+- A page reaching `navigator.modelContext` and never `document.modelContext` — the object moved,
+  Chrome deprecated the old spelling in 150.0.7861.0 and plans to remove it, and this registers today
+  and stops registering on an unannounced browser update, silently.
+
+**Script bundles are fetched and searched**, because registration almost never lives in an inline
+script and reading only those would report every bundled page as registering nothing. Same-origin
+bundles always; cross-origin ones only from origins the deployment names in the new
+`webMcp.scriptOrigins` capability field. An undeclared origin is never fetched — that is what keeps
+a run from pulling an arbitrary third party's CDN into a consumer's CI, or reporting somebody else's
+bundle as their defect — and a page loading one gets an advisory naming what went unread. A declared
+bundle that fails to return is also an advisory rather than a failure: a slow or unreachable CDN is a
+gap in the run, not a finding about the server.
+
+**Why the allowlist earns its place:** which spelling a page used is visible *only* in source text.
+On any browser that has the API, `navigator.modelContext` and `document.modelContext` reference one
+object, so driving a real browser cannot reveal the page's choice. A team shipping registration from
+their own CDN would otherwise have no route to that check at all.
+
+### Added — `defineWebMcpImperativeSuite`, which drives a real browser
+
+The declarative suite reads text and therefore cannot see whether `registerTool()` ran. This one
+loads each declared page in Chrome and asks it `getTools()` — the same question an attached agent
+asks — which is the only way to catch the failure the platform documentation names: a page whose own
+tests are green while DevTools reads zero tools, because registration never landed. The `navigator`
+→ `document` migration broke exactly that class of test.
+
+What it fails on: every registered tool carries the `name` and `description` the IDL requires; names
+are unique per document; and **every page declared in `toolPages` registered something**. That last
+one is assertable precisely because the consumer declared the page — registering nothing contradicts
+their own claim, and both readings of it (the list is wrong, or the call never landed) are real
+findings.
+
+What it advises on: a page that registered through the deprecated `navigator` spelling, a tool
+declaring none of the three annotations, and a tool claiming `readOnlyHint` — which nothing verifies
+and nothing requires an agent to honour, so on a tool that writes it is a shipped vulnerability
+rather than a mislabel.
+
+**The install cost is deliberately small.** `playwright-core` is an **optional peer dependency** —
+about 14 MB, shipping **no browser binaries**; the browser is whatever Chrome the machine already
+has, or `MCP_TESTS_CHROME_PATH`. A consumer who never registers this suite installs nothing extra.
+
+**It is not registered by `defineWebMcpConformanceSuites`.** This package's standing promise is that
+a new version can turn a green run red only through a real requirement — never through advice, and
+never through infrastructure. Auto-registering a browser-driven suite would break every existing
+consumer's run with a missing-Chrome error, which is neither a finding about their server nor
+something they asked for. So it is named explicitly, and a missing library, a missing binary, or a
+Chrome without the API stops the run **with both ways out named** rather than skipping silently.
+
+**The flag is configured for you.** Chrome is launched with
+`--enable-features=WebMCPTesting,DevToolsWebMCPSupport` (exported as `WEBMCP_LAUNCH_ARGS`), the
+command-line spelling of `chrome://flags/#enable-webmcp-testing`. Chrome documents the flag
+(146.0.7672.0+) and the origin trial (149–156) but **not** the switch, which comes from a single
+secondary source — so it is a default the suite can be overridden out of via `launchArgs` /
+`MCP_TESTS_CHROME_ARGS`, never a fact this package asserts. The API's presence is verified before any
+conclusion is drawn from a page, so a renamed switch produces a named stop listing what to try, not a
+page reported as publishing nothing.
+
+**The reader is discovered rather than assumed.** The specification's IDL puts `getTools()` on
+`document.modelContext`; Chrome's testing flag is documented as exposing a separate
+`navigator.modelContextTesting`, and published sources name its reader differently (`getTools()`
+versus `listTools()`). The suite probes each and reports which answered, turning a documentation
+conflict into evidence from the machine that ran the suite.
+
+To reach the page the way production serves it, the harness fronts the deployment with an HTTPS
+listener holding a certificate for the canonical host and points Chrome at it with
+`--host-resolver-rules`, so absolute URLs resolve and the page gets the secure context WebMCP
+requires.
+
+### Added — icon `theme`, and the trap in publishing only tuned variants
+
+The `Icon` shape also carries `theme?: "light" | "dark"`. **Absent is not a default of light** — the
+spec says a client "should assume the icon can be used with any theme" — and the spec states **no
+rule for how a client chooses among several icons**.
+
+That silence is the whole constraint. A server publishing only `light` and `dark` variants cannot
+rely on any client finding the one matching its ground: a client that ignores `theme`, or that takes
+the first renderable entry, draws whichever came first. A mark that was merely *untuned* becomes one
+drawn *for the wrong ground*, with no error and no fallback.
+
+New advisory in the `protocol` family (`icon themes`) reports a tagged-only set, or an untagged entry
+published behind tagged ones. **Advice, not a requirement** — what it hedges against is an absence in
+the specification, and a server publishing a single untagged icon was correct before and is correct
+now.
+
+### Changed
+
+- **`parseAttributes` moved to a new `harness/html.ts`**, shared by the modelled browser and the
+  WebMCP surface. Two copies of an attribute parser is two places for a quoting bug to live, and a
+  quoting bug there misreports a consumer's page as publishing something it does not. Internal; no
+  export changed.
+- **`createLoopbackTlsMaterial` takes optional extra SAN hostnames**, so the browser front can hold
+  a certificate for the deployment's canonical host. Existing callers are unchanged.
+- **`EdgeTarget` gained `remote`**, and the transport dials the real host over TLS when it is set,
+  omitting the forwarded headers — a remote deployment already sits behind its own proxy, and
+  supplying a second set would describe a hop that did not happen.
+- **New exports**: `defineDiscoveryConformanceSuites`, `defineAuthorizationSurfaceSuite`,
+  `RemoteDeployment`, `TargetDeployment`, `isRemoteDeployment`; `WEBMCP` clauses, `WebMcpCapability`,
+  the WebMCP surface readers
+  (`declarativeWebMcpTools`, `declarativeToolProblem`, `duplicateDeclarativeToolNames`,
+  `undescribedParameters`, `imperativeRegistrationStyle`, `inlineScriptText`, `scriptSources`,
+  `triageScriptUrls`), and the browser harness (`openWebMcpBrowser`, `startCanonicalProxy`).
+- **Toolkit pin moved to v0.69.0.** Development-time only; nothing a consumer installs changes.
+
+### Consumer action
+
+1. **If you name the ChatGPT redirect constants**, rename them (`CHATGPT_STABLE_REDIRECT_URI`,
+   `CHATGPT_PER_CONNECTION_REDIRECT_URI`).
+2. **If your ChatGPT suite goes red on the redirect test**, read it as a finding rather than a
+   regression: your server advertises `iss`, so ChatGPT sends the stable URI, and it must be
+   registrable.
+3. **The `webmcp` family costs you nothing until you declare `webMcp`.** No existing family changed,
+   and the browser suite is opt-in on top of that — `npm i -D playwright-core` only if you register
+   `defineWebMcpImperativeSuite`.
+
 ## v0.6.0 — The stateless revision, asserted; and everything it merely offers, advised
 
 MCP shipped its largest revision since launch on 2026-07-28, and it is mostly **subtractive**, which

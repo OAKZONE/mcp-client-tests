@@ -85,9 +85,19 @@ with no OAuth still gets every family that does not need one.
 
 | Family | Requires | Asks |
 |:---|:---|:---|
+| `discovery` | — | Can a client find you and start? Runs against a **remote** deployment, so you can point it at staging or production. |
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
 | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates? |
+| `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states? |
 | `tool-surface` *(next)* | — | Do the published tools satisfy the tool-design rules? |
+
+**`webmcp` asserts against a different specification from the rest.** WebMCP is the browser API that
+lets a page hand its own functions to an agent attached to the browser. It borrows MCP's vocabulary
+and none of its wire — no JSON-RPC, no transport, no server, no OAuth — so no MCP clause binds a tool
+published in a page. The *declarative* API is served HTML and provable over the wire; the imperative
+`document.modelContext.registerTool(...)` is reached by an opt-in suite that drives a real Chrome
+through `playwright-core` — an optional peer dependency shipping no browser binaries — and is the
+only way to catch a page whose registration call never landed.
 
 Adding a family never changes an existing one. See **[docs/extending.md](docs/extending.md)**.
 

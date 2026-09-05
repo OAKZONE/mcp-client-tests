@@ -30,3 +30,7 @@ setup.local.sh
 # PUBLIC, and `files: ["docs"]` would ship them to every consumer. Same reason as
 # the block above: never let toolkit content into a tracked file here.
 docs/todo/
+
+# Materialized by sync from the PRIVATE toolkit's templates/REVIEW.md.template. Same rule as the
+# block above: this repository is PUBLIC, so a toolkit-authored file never becomes a tracked one.
+REVIEW.md

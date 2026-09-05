@@ -20,12 +20,15 @@
  * suite pins this deployment's behaviour there and says so in the test's own docstring. The MCP
  * revision this surface negotiates is Unverified for the same reason.
  *
- * **Re-read 2026-08-29 against the plugin changelog to 2026-08-21. No field moved**, and one new
- * fact changes what a server gains by emitting RFC 9207 `iss`: since 2026-08-21 **a plugin can use
- * a stable OAuth redirect URL together with client-ID metadata when the authorization server
- * returns `iss`**, which removes the per-connection callback churn this profile still models. The
- * per-connection URI remains the documented default, so it stays what the suite drives; the `iss`
- * assertion lives in the Claude Code suite, where a client is documented to fail without it.
+ * **Corrected 2026-09-05 — the redirect-URI facts here were recorded backwards.** This profile
+ * described `https://chatgpt.com/connector_platform_oauth_redirect` as a legacy path and asserted
+ * that a deployment should not depend on it. OpenAI documents it as the form ChatGPT *uses* once
+ * the authorization server emits RFC 9207 `iss`; the per-connection `{callback_id}` URI is the
+ * fallback for servers that do not. See {@link CHATGPT_STABLE_REDIRECT_URI}.
+ *
+ * The profile still **drives** the per-connection form by default, because that is the form a
+ * server reaches without qualifying for anything — but the suite now reads the deployment's own
+ * `iss` advertisement and reports which of the two it has actually earned.
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -35,24 +38,66 @@ import {
 } from "../harness/vendor-profile.js";
 
 /**
- * A per-connection ChatGPT callback.
+ * A per-connection ChatGPT callback — the **fallback** form.
  *
- * New connections use `https://chatgpt.com/connector/oauth/{callback_id}`; the exact value is shown
- * in the plugin management surface and must be allowlisted exactly rather than guessed or
- * wildcarded. The id below is an arbitrary opaque value standing in for one issued connection —
- * what the suite exercises is that an exact, previously unseen per-connection URI registers and
- * round-trips, which is the property that matters.
+ * Used when the authorization server does **not** identify itself per RFC 9207. The exact value is
+ * shown in the plugin management surface and must be allowlisted exactly rather than guessed or
+ * wildcarded, and it changes per connection, which is the churn the stable form removes. The id
+ * below is an arbitrary opaque value standing in for one issued connection — what the suite
+ * exercises is that an exact, previously unseen per-connection URI registers and round-trips.
  */
-export const CHATGPT_REDIRECT_URI =
+export const CHATGPT_PER_CONNECTION_REDIRECT_URI =
   "https://chatgpt.com/connector/oauth/c0nf0rmance-callback-id";
 
 /**
- * The legacy shared callback, retained by OpenAI only for already-published apps.
+ * The stable shared callback — the **recommended** form.
  *
- * Modelled so a deployment can check it does not accidentally depend on it.
+ * **This package previously recorded these two the wrong way round**, describing the stable URI as
+ * a legacy path surviving "only for already-published apps" and asserting that a deployment should
+ * not depend on it. OpenAI documents the opposite: *"If your authorization server meets those
+ * requirements, ChatGPT uses the stable redirect URI
+ * `https://chatgpt.com/connector_platform_oauth_redirect`."* The requirement is RFC 9207 issuer
+ * identification — returning `iss` on the authorization response, the same validation the
+ * `2026-07-28` MCP revision requires of clients.
+ *
+ * Emitting `iss` is therefore the prerequisite that moves a deployment off per-connection callback
+ * churn, which makes it a thing worth advising about rather than a compatibility path to avoid.
  */
-export const CHATGPT_LEGACY_REDIRECT_URI =
+export const CHATGPT_STABLE_REDIRECT_URI =
   "https://chatgpt.com/connector_platform_oauth_redirect";
+
+/**
+ * Which redirect URI ChatGPT uses against a server, given whether that server identifies itself.
+ *
+ * @param emitsIssuerIdentification - Whether the authorization server advertises RFC 9207 `iss` on
+ *   the authorization response (`authorization_response_iss_parameter_supported`).
+ * @returns The redirect URI ChatGPT drives — stable when the server qualifies, per-connection when
+ *   it does not.
+ */
+export function chatgptRedirectUri(emitsIssuerIdentification: boolean): string {
+  return emitsIssuerIdentification
+    ? CHATGPT_STABLE_REDIRECT_URI
+    : CHATGPT_PER_CONNECTION_REDIRECT_URI;
+}
+
+/**
+ * The CIMD `client_id` ChatGPT presents, which follows the same split as the redirect URI.
+ *
+ * `https://chatgpt.com/oauth/client.json` when the authorization server does RFC 9207 issuer
+ * identification, and `https://chatgpt.com/oauth/{callback_id}/client.json` when it does not.
+ *
+ * @param emitsIssuerIdentification - Whether the authorization server advertises RFC 9207 `iss`.
+ * @param callbackId - The per-connection callback id, used only in the fallback form.
+ * @returns The client-ID metadata document URL ChatGPT would present.
+ */
+export function chatgptClientIdMetadataUrl(
+  emitsIssuerIdentification: boolean,
+  callbackId: string,
+): string {
+  return emitsIssuerIdentification
+    ? "https://chatgpt.com/oauth/client.json"
+    : `https://chatgpt.com/oauth/${callbackId}/client.json`;
+}
 
 const CLIENT_METADATA_PATH = "/chatgpt/oauth/client-metadata";
 const CLIENT_JWKS_PATH = "/chatgpt/oauth/jwks.json";
@@ -78,7 +123,7 @@ export function chatgptClientMetadata(
     client_id: clientIdUrl,
     client_name: "ChatGPT",
     client_uri: "https://chatgpt.com",
-    redirect_uris: [CHATGPT_REDIRECT_URI],
+    redirect_uris: [CHATGPT_PER_CONNECTION_REDIRECT_URI],
     grant_types: ["authorization_code", "refresh_token"],
     response_types: ["code"],
     token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
@@ -103,14 +148,17 @@ export function chatgptDesktopProfile(
     displayName: "ChatGPT (Developer mode / published plugin)",
     documentation: VENDOR.OPENAI_PLUGIN_AUTH,
     verifiedAgainst:
-      "OpenAI Plugins documentation plus live ChatGPT Desktop connector, verified 2026-08-15 and " +
-      "re-read 2026-08-29 including the plugin changelog to 2026-08-21 — no field moved",
+      "OpenAI Plugins documentation plus live ChatGPT Desktop connector, verified 2026-08-15, " +
+      "re-read 2026-08-29 including the plugin changelog to 2026-08-21, and corrected 2026-09-05 " +
+      "when the redirect-URI guidance was found inverted — the stable " +
+      "`connector_platform_oauth_redirect` is the recommended form for an authorization server " +
+      "emitting RFC 9207 `iss`, and the per-connection `{callback_id}` URI is the fallback",
 
     // ChatGPT supports CIMD, DCR, and pre-registration, and the plugin builder can select DCR even
     // when CIMD is available — so a deployment advertising both must keep both paths working. This
     // profile drives CIMD; the DCR path is exercised separately in the same suite.
     registration: "client_id_metadata_document",
-    redirectUri: CHATGPT_REDIRECT_URI,
+    redirectUri: CHATGPT_PER_CONNECTION_REDIRECT_URI,
     clientMetadata: chatgptClientMetadata(clientMetadataUrl, jwksUrl),
     clientMetadataPath: CLIENT_METADATA_PATH,
     clientJwksPath: CLIENT_JWKS_PATH,

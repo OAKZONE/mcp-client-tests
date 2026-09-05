@@ -81,6 +81,51 @@ export interface DeploymentSpec {
   preflight?(): string | undefined;
 }
 
+/**
+ * A server that is **already running** somewhere this run can reach — staging, production, a
+ * preview deployment.
+ *
+ * **What this buys, and what it cannot.** A spawned deployment is what lets this package mint a
+ * certificate authority the server trusts, host client-metadata documents the server fetches back,
+ * and create account holders in its storage. None of that is possible against a host you do not
+ * control the process of, so a remote target runs only what needs no credential and no callback:
+ * the `discovery` family, which asserts the authorization surface a client reads *before* it has a
+ * token. That is a genuinely useful thing to point at production, and it is deliberately not
+ * dressed up as more than it is.
+ *
+ * Declaring `authorization` alongside this is refused rather than half-honoured, because the OAuth
+ * families would need to write into the server's storage and drive its consent screen.
+ */
+export interface RemoteDeployment {
+  /** Discriminator. A deployment either describes how to start a server, or says it is already up. */
+  readonly remote: true;
+  /**
+   * A path on the canonical origin that answers before the suites start, e.g. the MCP endpoint.
+   *
+   * Any status counts as reachable — a `401` is the healthiest thing an MCP endpoint can say to an
+   * unauthenticated probe. What this catches is a host that does not resolve or does not listen,
+   * which would otherwise surface as every assertion failing for one reason.
+   */
+  readonly readyPath?: string;
+  /** How long to wait for that probe. Defaults to 30 seconds. */
+  readonly readyTimeoutMs?: number;
+}
+
+/** How the server under test is obtained: started by this package, or already running. */
+export type TargetDeployment = DeploymentSpec | RemoteDeployment;
+
+/**
+ * Whether a deployment is one this package must not try to start.
+ *
+ * @param deployment - The target's deployment.
+ * @returns True when the server is already running elsewhere.
+ */
+export function isRemoteDeployment(
+  deployment: TargetDeployment,
+): deployment is RemoteDeployment {
+  return "remote" in deployment && deployment.remote === true;
+}
+
 /** A signed-in account holder in the server under test, and the cookie that proves it. */
 export interface AccountHolder {
   readonly userId: string;
@@ -150,9 +195,61 @@ export interface AuthorizationCapability {
 }
 
 /**
+ * A deployment that also serves pages publishing WebMCP tools.
+ *
+ * **WebMCP is not MCP.** It is the browser API that lets a page hand its own functions to an
+ * in-browser agent as typed tools; it shares MCP's vocabulary and none of its wire — no JSON-RPC,
+ * no transport, no server, no OAuth. A tool registered this way runs in the user's tab, inside
+ * their live authenticated session, with no token, no scope, and no consent step of its own.
+ *
+ * Declaring this capability says **the deployment serves these pages**, which is a fact about the
+ * deployment in exactly the way {@link AuthorizationCapability} is. It does not say "run the WebMCP
+ * tests"; a page list is something a server either has or does not.
+ *
+ * **What gets checked, and what cannot be.** The package fetches each page over the same transport
+ * every other suite uses and reads the *declarative* tools out of the served HTML — forms carrying
+ * `toolname`, `tooldescription` and `toolparamdescription`. The *imperative* API
+ * (`document.modelContext.registerTool`) is a JavaScript call that never crosses a socket, so no
+ * assertion here can reach it; the suite says so out loud rather than reporting a page with only
+ * imperative tools as having none.
+ */
+export interface WebMcpCapability {
+  /**
+   * Paths on the canonical origin that register WebMCP tools, e.g. `/dashboard`.
+   *
+   * Listed rather than crawled: a crawler would report a page's absence as a finding about the
+   * server, when it is really a finding about the crawler's reach.
+   */
+  readonly toolPages: readonly string[];
+  /**
+   * A cookie proving a signed-in viewer, when the tool pages are behind a session.
+   *
+   * WebMCP tools exist to be called on behalf of a signed-in user, so the interesting surface is
+   * usually the authenticated one. Omit it for pages that render their tools to anyone.
+   */
+  readonly viewerCookie?: {
+    readonly name: string;
+    readonly value: string;
+  };
+  /**
+   * Other origins these pages load their own scripts from, e.g. `https://cdn.example.com`.
+   *
+   * **Only these are fetched when the suite looks for registration in a bundle.** Same-origin
+   * scripts always are; anything else is read only if it is named here. Declaring an origin is the
+   * deployment saying "this code is mine" — a fact about where its pages load from — and it is what
+   * keeps a conformance run from pulling an arbitrary third party's CDN into CI, or reporting
+   * somebody else's bundle as a finding about this server.
+   *
+   * Scripts on an undeclared origin are not fetched and are named in an advisory instead, so a page
+   * whose registration lives out there is never silently reported as registering nothing.
+   */
+  readonly scriptOrigins?: readonly string[];
+}
+
+/**
  * One MCP server to test.
  *
- * The `authorization` capability is optional on purpose — see the module header.
+ * The `authorization` and `webMcp` capabilities are optional on purpose — see the module header.
  */
 export interface McpTestTarget {
   /** Stable identifier, used in temp-file names and diagnostics. */
@@ -169,8 +266,14 @@ export interface McpTestTarget {
   readonly canonicalOrigin: string;
   /** The MCP endpoint path a user would type, e.g. `/mcp`. */
   readonly mcpPath: string;
-  readonly deployment: DeploymentSpec;
+  /**
+   * How the server is obtained: a {@link DeploymentSpec} this package starts and stops, or a
+   * {@link RemoteDeployment} saying it is already running. See {@link RemoteDeployment} for what a
+   * remote target can and cannot be asked.
+   */
+  readonly deployment: TargetDeployment;
   readonly authorization?: AuthorizationCapability;
+  readonly webMcp?: WebMcpCapability;
 }
 
 /** The MCP server URL a user pastes into their client. */

@@ -24,6 +24,7 @@
  */
 
 import { edgeRequest, type EdgeTarget, type WireResponse } from "./edge-transport.js";
+import { parseAttributes } from "./html.js";
 
 /** One navigation step, kept so a test can assert the shape of a redirect chain. */
 export interface NavigationStep {
@@ -58,20 +59,6 @@ export interface HtmlForm {
     readonly checked: boolean;
     readonly disabled: boolean;
   }[];
-}
-
-/** Parse one HTML tag's attributes into a map, tolerating any attribute order. */
-function parseAttributes(tag: string): Map<string, string> {
-  const attributes = new Map<string, string>();
-  const pattern = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
-  let match = pattern.exec(tag);
-  // The first match is the tag name itself; skip it.
-  match = pattern.exec(tag);
-  while (match !== null) {
-    attributes.set(match[1].toLowerCase(), match[2] ?? match[3] ?? match[4] ?? "");
-    match = pattern.exec(tag);
-  }
-  return attributes;
 }
 
 /**

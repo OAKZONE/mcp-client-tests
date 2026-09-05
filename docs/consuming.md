@@ -163,6 +163,166 @@ server does not publish — `instructions`, `icons[]`, tool descriptions, an `ou
 fail a run.** Adopting a new version of this package can turn your run red only through a real
 requirement.
 
+### The discovery family — `mcp-tests/discovery.test.ts`
+
+Asks the one question every other family assumes the answer to: **can a client find you and
+start?** The `401` challenge, the protected-resource document, the authorization-server document,
+and the URLs a client derives to reach them.
+
+```ts
+import { defineDiscoveryConformanceSuites } from "@oakzone/mcp-client-tests";
+import { target } from "./target";
+
+defineDiscoveryConformanceSuites(target);
+```
+
+**It needs no capability and no credential**, which makes it the one family that can run against a
+server this package did not start:
+
+```ts
+export const target: McpTestTarget = {
+  id: "stageify-dev",
+  canonicalOrigin: "https://dev.stageify.net",
+  mcpPath: "/mcp",
+  deployment: { remote: true },   // already running — nothing is spawned or stopped
+};
+```
+
+Point it at staging or production. Nothing is written, no client is registered, and the only
+requests made are the ones an unauthenticated client makes anyway.
+
+**What it fails on:** an unauthenticated call that is not a transport-level `401`; a challenge with
+no `resource_metadata` pointer; an invalid token that does not come back `invalid_token`;
+protected-resource metadata missing from a URL clients derive; the authorization-server document
+missing from the RFC 8414 **inserted** path; an `issuer` that does not match the URL it was fetched
+from; and a missing `S256`.
+
+**What it advises on:** `offline_access` in the wrong document (the single most common reason
+refresh silently never happens), CIMD advertised without both election conditions, a missing RFC
+9207 `iss`, no registration path at all, an append-shaped discovery alias that no client derives,
+and an origin-level authorization-server document naming a path-bearing issuer.
+
+**What a clean run does *not* prove**, stated as an advisory on every run: no token was exchanged,
+no consent screen submitted, no refresh attempted. Discovery being correct is not authorization
+working.
+
+**Remote targets cannot declare `authorization`.** The OAuth families create an account holder in
+the server's storage and need the server to trust a certificate authority minted for the run — both
+of which require this package to have started the process. Declaring both is refused with the two
+ways out named, rather than half-honoured.
+
+### The WebMCP family — `mcp-tests/webmcp.test.ts`
+
+Asks what the **pages** of your deployment hand to an agent running inside the user's browser.
+
+```ts
+import { defineWebMcpConformanceSuites } from "@oakzone/mcp-client-tests";
+import { target } from "./target";
+
+defineWebMcpConformanceSuites(target);
+```
+
+**WebMCP is not MCP.** It is the W3C Web Machine Learning Community Group draft that lets a page
+register its own functions as typed tools via `document.modelContext`. It borrows MCP's vocabulary —
+tools, descriptions, JSON Schema — and none of its wire: no JSON-RPC, no transport, no server, no
+OAuth. A tool registered this way runs in the user's tab, in their live authenticated session, with
+no token, no scope and no consent step of its own. Nothing in the `protocol` or `oauth` families
+says anything about it, and no assertion in this family cites an MCP clause.
+
+**It requires the `webMcp` capability**, which names the pages that publish tools:
+
+```ts
+webMcp: {
+  toolPages: ["/dashboard", "/orders"],
+  // Only if those pages are behind a session:
+  viewerCookie: { name: "session", value: process.env.CONFORMANCE_SESSION! },
+  // Only if your pages load their own scripts from another origin:
+  scriptOrigins: ["https://cdn.example.com"],
+},
+```
+
+The pages are listed rather than crawled, because a crawler's reach would get reported as a finding
+about your server.
+
+**What it reads.** The *declarative* API is served HTML — a `<form>` carrying `toolname`,
+`tooldescription` and `toolparamdescription` — so it is fetched through the same proxy translation
+every other suite uses and asserted on directly. It also fetches your **script bundles** and
+searches them, because registration almost never lives in an inline script: same-origin ones always,
+and cross-origin ones only from the origins you name in `scriptOrigins`. An undeclared origin is
+never fetched — that is what keeps a conformance run from pulling an arbitrary third party's CDN
+into your CI — and a page that loads one gets an advisory naming what went unread. A declared bundle
+that fails to come back is also an advisory, never a failure: a slow or unreachable CDN is a gap in
+the run, not a defect in your server.
+
+What that catches is the migration that breaks registration silently: the object moved from
+`navigator.modelContext` to `document.modelContext`, Chrome deprecated the old spelling in
+150.0.7861.0 and plans to remove it, and much third-party writing still shows it. **Source text is
+the only place that fact lives** — both names reference one object on a browser that has the API, so
+no amount of driving a real browser reveals which spelling your page wrote. That is why naming your
+CDN origin matters if your registration ships in a bundle.
+
+**It does not execute your page.** Whether `registerTool()` actually ran is not visible in text —
+that is the browser suite below.
+
+### Driving a real browser — `defineWebMcpImperativeSuite`
+
+The only way to catch the documented silent failure: a page whose own tests are green while
+DevTools reads zero tools, because registration never landed.
+
+```ts
+import { defineWebMcpImperativeSuite } from "@oakzone/mcp-client-tests";
+import { target } from "./target";
+
+defineWebMcpImperativeSuite(target);
+```
+
+**You do not have to configure the flag.** The suite launches Chrome with
+`--enable-features=WebMCPTesting,DevToolsWebMCPSupport`, the command-line spelling of
+`chrome://flags/#enable-webmcp-testing`. Override it with `launchArgs` (or `MCP_TESTS_CHROME_ARGS`)
+if a Chrome release renames the feature, or to serve an origin-trial token instead.
+
+**Chrome 149 or newer.** The flag exists from 146.0.7672.0 and the origin trial runs from Chrome 149
+(through 156). If the launched browser is older there is nothing to enable, which is the first thing
+the failure message tells you to check.
+
+It loads each page in Chrome and asks it for its registered tools — the same question an attached
+agent asks — then asserts every one carries the `name` and `description` the IDL requires, that names
+are unique per document, and that **every page you declared in `toolPages` registered something**.
+That last one is assertable precisely because you declared the page: registering nothing contradicts
+your own claim, and both readings of that contradiction are real findings.
+
+**Which reader it uses is discovered, not assumed.** The specification's IDL puts `getTools()` on
+`document.modelContext`; Chrome's testing flag is documented as exposing a separate
+`navigator.modelContextTesting`, whose reader two sources name differently (`getTools()` versus
+`listTools()`). The suite probes each in turn and reports the one that answered in an advisory, so a
+Chrome release that moves it shows up as a change rather than as your pages registering nothing.
+
+**Install cost.** `playwright-core` is an **optional peer dependency** — about 14 MB, and it ships
+**no browser binaries**. The browser is whatever Chrome the machine already has; point
+`MCP_TESTS_CHROME_PATH` at one if it is somewhere unusual. A consumer who never registers this suite
+installs nothing extra.
+
+```bash
+npm i -D playwright-core
+```
+
+**It is not registered by `defineWebMcpConformanceSuites`, on purpose.** Adopting a new version of
+this package can turn your run red only through a real requirement — never through advice, and never
+through missing infrastructure. So you name this suite explicitly, and a missing library, missing
+binary, or a Chrome without the API stops the run with both ways out named. None of those is a
+silent skip.
+
+Under the hood it fronts your deployment with an HTTPS listener holding a certificate for your
+canonical host and points Chrome at it with `--host-resolver-rules`, so the page loads on the origin
+production serves — absolute URLs and all — and gets the secure context WebMCP requires.
+
+**Most of what it has to say is advisory**, because by the explainer's own account the declarative
+half is the less finished half — input-schema synthesis is marked TBD and the response mechanism is
+under debate. Only what the specification *states* is asserted: every declarative tool carries the
+`description` the IDL requires, and names are unique within a document. The security guidance —
+undescribed parameters, `toolautosubmit` as a consent decision, over-parameterization as a privacy
+leak — arrives as advice with the clause that offers it.
+
 ## 5. Run it
 
 ```bash

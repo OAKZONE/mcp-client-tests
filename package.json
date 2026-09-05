@@ -1,6 +1,6 @@
 {
   "name": "@oakzone/mcp-client-tests",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Conformance suites for MCP servers, written from the specifications and from what MCP client vendors publish.",
   "private": true,
   "type": "module",
@@ -43,7 +43,13 @@
     "upgrade-toolkit": "agent-toolkit-sync --upgrade"
   },
   "peerDependencies": {
+    "playwright-core": ">=1.40",
     "vitest": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "playwright-core": {
+      "optional": true
+    }
   },
   "dependencies": {
     "oauth4webapi": "^3.8.6"
@@ -54,11 +60,12 @@
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
     "eslint": "^9.39.4",
+    "playwright-core": "^1.63.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   },
   "optionalDependencies": {
-    "@oakzone/agent-toolkit": "github:OAKZONE/agent-toolkit#v0.67.0"
+    "@oakzone/agent-toolkit": "github:OAKZONE/agent-toolkit#v0.69.0"
   },
   "repository": {
     "type": "git",
