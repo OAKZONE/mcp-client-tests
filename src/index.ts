@@ -32,6 +32,7 @@ export type {
   RemoteDeployment,
   TargetDeployment,
   WebMcpCapability,
+  WebMcpToolCall,
 } from "./target.js";
 export { isRemoteDeployment, mcpServerUrl } from "./target.js";
 
@@ -89,9 +90,45 @@ export {
   type CanonicalProxy,
   type RegisteredToolReading,
   type RegisteredWebMcpTool,
+  type ToolExecutionReading,
   type WebMcpBrowserOptions,
   type WebMcpBrowserSession,
 } from "./harness/webmcp-browser.js";
+
+export {
+  acceptedEncodings,
+  executionProblem,
+  executionResultPayloads,
+  inputSchemaEncoding,
+  parseInputSchema,
+  registeredToolSchemaProblem,
+  reportedParameterValues,
+  roundTripViolations,
+  schemaProperties,
+  schemaRefusal,
+  type ArgumentEncoding,
+  type ExecutionAttempt,
+  type InputSchemaEncoding,
+  type ReportedParameterValue,
+} from "./harness/webmcp-execution.js";
+
+export {
+  leakedRegistrations,
+  type DocumentToolReading,
+} from "./harness/webmcp-lifetime.js";
+
+export {
+  conditionalDeliveryProblem,
+  decodeOriginTrialToken,
+  originCanHoldTrialToken,
+  originTrialCoverage,
+  originTrialProblem,
+  servedOriginTrialTokens,
+  type OriginTrialCoverage,
+  type OriginTrialDelivery,
+  type OriginTrialTokenPayload,
+  type ServedOriginTrialToken,
+} from "./harness/webmcp-origin-trial.js";
 
 export {
   declarativeToolProblem,

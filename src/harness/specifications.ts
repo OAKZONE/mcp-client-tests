@@ -119,6 +119,24 @@ const READ_STATELESS = "2026-08-29";
 const READ_VENDOR_SWEEP = "2026-09-05";
 
 /**
+ * When the WebMCP execution-shape sources were read, and when the browser observations recorded
+ * beside them were made.
+ *
+ * A fourth stamp for the reason the third one exists: this pass read the WebMCP draft's own IDL and
+ * Chrome's origin-trial documentation and left every other row standing. Dating the whole file to it
+ * would claim a re-read that did not happen.
+ */
+const READ_WEBMCP_EXECUTION = "2026-09-06";
+
+/**
+ * When RFC 6761 was read.
+ *
+ * Its own stamp for the same reason every other one has one: this pass read that RFC and nothing
+ * else, and borrowing a neighbouring date would claim a re-read of sources it never opened.
+ */
+const READ_RESERVED_NAMES = "2026-09-09";
+
+/**
  * IETF clauses. These bind every OAuth client, so an assertion citing one of these belongs in the
  * shared spine rather than a vendor profile.
  */
@@ -278,6 +296,24 @@ export const IETF = Object.freeze({
     "RFC 7523 §2.2 (Using JWTs for Client Authentication) with OpenID Connect Core §9",
     `${RFC}/rfc7523#section-2.2`,
     READ,
+  ),
+  /**
+   * Names that can never resolve on the public internet — which decides what a run may conclude
+   * from the origin a deployment is driven under.
+   *
+   * `test.`, `localhost.` and `invalid.` are reserved precisely so they never reach the DNS, and
+   * this package tells consumers to use one: an unroutable canonical origin is what keeps the
+   * issuer HTTPS and port-free while the socket stays on loopback.
+   *
+   * **`example.` and `example.com` are deliberately not in that set.** RFC 6761 reserves them too,
+   * but for documentation rather than for non-resolution — they resolve, and IANA serves them — so
+   * the property this clause is cited for does not hold of them.
+   */
+  RESERVED_UNROUTABLE_NAMES: clause(
+    "RFC 6761 §6.2, §6.3, §6.4 (Special-Use Domain Names — `test.`, `localhost.`, `invalid.` are " +
+      "not looked up in the DNS and never resolve publicly)",
+    `${RFC}/rfc6761#section-6.2`,
+    READ_RESERVED_NAMES,
   ),
 });
 
@@ -622,6 +658,150 @@ export const WEBMCP = Object.freeze({
     "WebMCP — Chrome for Developers (the `#enable-webmcp-testing` flag and the Chrome 149 origin trial)",
     "https://developer.chrome.com/docs/ai/webmcp",
     READ_VENDOR_SWEEP,
+  ),
+  /**
+   * What a registered tool's `inputSchema` is — and the draft carries **both** answers.
+   *
+   * The IDL types `RegisteredTool.inputSchema` as `object`. The supporting concepts one section
+   * above type a tool definition's input schema as *a string*, and say so explicitly for the
+   * imperative form: "this is the stringified representation of `inputSchema`". A page passes an
+   * object to `registerTool` and what comes back out of `getTools()` is the other one.
+   *
+   * So the shape a reader will meet is not settled by reading harder, and no assertion here picks a
+   * winner between them. What is assertable is what both readings agree on: there is a schema, and
+   * it describes an object's properties. Which encoding a browser hands back is recorded.
+   */
+  INPUT_SCHEMA_SHAPE: clause(
+    "WebMCP — Draft Community Group Report §4.2 (`RegisteredTool.inputSchema` is IDL `object`, " +
+      "while a tool definition's input schema is a string — the stringified representation for " +
+      "imperatively registered tools)",
+    "https://webmachinelearning.github.io/webmcp/#dictdef-registeredtool",
+    READ_WEBMCP_EXECUTION,
+  ),
+  /**
+   * `executeTool(tool, inputObject, options)` — the arguments go in as an IDL `object`, and the
+   * result comes back as a `DOMString` holding the stringified result.
+   *
+   * The asymmetry is the draft's own: the input is typed as a structure and the output as text.
+   */
+  EXECUTE_TOOL: clause(
+    "WebMCP — Draft Community Group Report §4.2 (`Promise<DOMString> executeTool(RegisteredTool " +
+      "tool, optional object inputObject = {}, optional ModelContextExecuteToolOptions options)`)",
+    "https://webmachinelearning.github.io/webmcp/#dom-modelcontext-executetool",
+    READ_WEBMCP_EXECUTION,
+  ),
+  /**
+   * A registration belongs to one `Document`, and the only way to take it back is to abort.
+   *
+   * Each `Document` has an associated `ModelContext` holding its own tool map. There is no
+   * `unregisterTool()` on the public API: `ModelContextRegisterToolOptions.signal` is an
+   * `AbortSignal` that "unregisters the tool when aborted".
+   *
+   * Which makes the failure mode quiet and cumulative rather than loud: a registration that outlives
+   * the document it was made for is never reported, it simply keeps taking up room.
+   */
+  PER_DOCUMENT_LIFETIME: clause(
+    "WebMCP — Draft Community Group Report §4.1 and §4.2.3 (each `Document` has an associated " +
+      "`ModelContext`; no `unregisterTool()`, and `ModelContextRegisterToolOptions.signal` " +
+      "unregisters the tool when aborted)",
+    "https://webmachinelearning.github.io/webmcp/#dictdef-modelcontextregistertooloptions",
+    READ_WEBMCP_EXECUTION,
+  ),
+  /**
+   * The draft and the shipping implementation disagree about the shapes an implementer touches on
+   * every single call — and a page can be correct against one and broken against the other.
+   *
+   * Graded down deliberately. It is the most consequential thing this family knows and the least
+   * established: nothing may fail a consumer's run over it, because a browser that agrees with the
+   * draft instead would then be reported as the defect.
+   */
+  EXECUTION_SHAPE_DIVERGENCE: graded(
+    "WebMCP — webmachinelearning/webmcp#287 (`RegisteredTool.inputSchema` / `executeTool` input / " +
+      "result — string vs object), with #278 and #279",
+    "https://github.com/webmachinelearning/webmcp/issues/287",
+    READ_WEBMCP_EXECUTION,
+    "moderate",
+    "an issue filed on the draft's own tracker — reporting that Chrome's origin-trial " +
+      "implementation returns `inputSchema` as a string, requires a JSON string as the " +
+      "`executeTool` argument, and returns `string | null` — corroborated by one first-hand " +
+      "reproduction in stock Chrome 151.0.7922.138 with no flags, against an origin carrying a " +
+      "trial token, on 2026-09-06: `executeTool(tool, {…})` threw `UnknownError: Failed to parse " +
+      "input arguments` where `executeTool(tool, JSON.stringify({…}))` succeeded. No vendor has " +
+      "published either shape as the contract, so a browser may legitimately accept the other one. " +
+      "Read the shape this run recorded; do not design against this note as though it were a rule",
+  ),
+  /**
+   * An empty DevTools WebMCP pane is not evidence of anything.
+   *
+   * The pane and the API ship on different switches, so the pane can be sitting there empty on a
+   * browser that has no `document.modelContext` at all — which reads exactly like a page whose
+   * tools failed to register, and sends the reader to debug the page instead of the browser.
+   */
+  DEVTOOLS_PANE_IS_NOT_EVIDENCE: graded(
+    "Chrome DevTools — the WebMCP pane, against Chrome's own WebMCP page which documents only the " +
+      "flag and the origin trial",
+    "https://developer.chrome.com/docs/ai/webmcp",
+    READ_WEBMCP_EXECUTION,
+    "moderate",
+    "Chrome's WebMCP documentation describes the `#enable-webmcp-testing` flag and the Chrome 149 " +
+      "origin trial and mentions no DevTools pane at all; that the pane is present unflagged while " +
+      "the API stays gated is one first-hand observation, stock Chrome 151.0.7922.138 on " +
+      "2026-09-06. Conclude nothing from an empty pane in either direction",
+  ),
+  /**
+   * A ceiling on how many tools one document may register — reported, never published.
+   *
+   * Recorded because the consequence is total and silent: past it, WebMCP reportedly stops working
+   * for the whole document, with nothing thrown and nothing to feature-detect. Recorded as `thin`
+   * because no vendor has ever published a number, and asserting one would eventually fail a page
+   * doing nothing wrong.
+   */
+  DOCUMENT_TOOL_CEILING: graded(
+    "WebMCP — community reports of a per-document registration ceiling",
+    "https://github.com/webmachinelearning/webmcp/issues",
+    READ_WEBMCP_EXECUTION,
+    "thin",
+    "an uncorroborated community report putting the ceiling somewhere near 296 tools, past which " +
+      "WebMCP stops working for the entire document with no error raised. No vendor has published " +
+      "a limit and none is feature-detectable, so treat this as a reason to keep registrations " +
+      "bounded and released, never as a number to design up to",
+  ),
+  /**
+   * How a production browser is told the API exists at all: a token, on the response.
+   *
+   * Delivered as an `Origin-Trial` response header or a `<meta http-equiv="origin-trial">` in the
+   * document. Chrome ignores invalid or expired tokens, and uses the first valid one it finds.
+   *
+   * The consequence that catches deployments: the token is read from *the response that carried
+   * it*. A response served without it is a response with no WebMCP — so a token attached to a rule
+   * that can decline to match disables the API for exactly the visitors that rule declines, while
+   * working perfectly for everyone else, including every developer.
+   */
+  ORIGIN_TRIAL_DELIVERY: clause(
+    "Chrome — Get started with origin trials (`Origin-Trial` response header or " +
+      "`<meta http-equiv=\"origin-trial\">`; Chrome ignores invalid or expired tokens and uses the " +
+      "first valid token)",
+    "https://developer.chrome.com/docs/web-platform/origin-trials",
+    READ_WEBMCP_EXECUTION,
+  ),
+  /**
+   * What is inside a trial token: version byte, signature, payload length, then a JSON payload
+   * carrying `origin`, `feature`, `expiry` and `isSubdomain`.
+   *
+   * Graded down because Chrome's published origin-trial pages describe how to *obtain and serve* a
+   * token and not how one is laid out. A token this package cannot decode is therefore reported as
+   * unread rather than as a defect — the risk being a harness artefact presented as a consumer
+   * finding, which is the one thing a conformance package must never do.
+   */
+  ORIGIN_TRIAL_TOKEN_PAYLOAD: graded(
+    "Chrome — origin-trial token layout (version, signature, payload length, JSON payload)",
+    "https://developer.chrome.com/docs/web-platform/origin-trials",
+    READ_WEBMCP_EXECUTION,
+    "moderate",
+    "the binary layout is not in Chrome's published origin-trial documentation; it is read back " +
+      "from live tokens and matches the fields those pages name in prose (`origin`, `feature`, " +
+      "expiry, subdomain matching). A token that does not decode here means this parser did not " +
+      "understand it — never that the token is bad",
   ),
 });
 

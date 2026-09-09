@@ -59,8 +59,14 @@ family means editing an existing suite, the abstraction is wrong — stop and fi
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, reconnect? | Shipped |
 | `protocol` | — | Revision `2026-07-28`: `server/discover`, no session, caching hints, tool names and schemas, list stability, both error channels | Shipped |
 | `tool-surface` | — | Will a client's gate let the published tools run — annotations, `title`, the 64-character name budget, read split from write, schema names a client validates, descriptions a scanner reads as an attack | Shipped |
-| `webmcp` | `webMcp` | Do pages publishing tools to an in-browser agent declare them the way the W3C draft states? | Shipped |
+| `webmcp` | `webMcp` | Do pages publishing tools to an in-browser agent declare them the way the W3C draft states, can a visitor's browser reach the API at all, does a document release its tools on the way out, and does a tool's result report values its own schema accepts? | Shipped |
 | *result gating* | — | Does what a tool **returns** stay inside the size thresholds clients truncate at, and is it free of the instruction-shaped text that puts an agent into refusal? | Not shipped: it needs a `tools/call` against a real tool, whose side effects the package must be invited to take |
+
+The WebMCP execution suite is what that last row's invitation looks like when it is taken:
+`webMcp.toolCalls` names tools the deployment says are safe to call, and the suite then reaches the
+shapes and the round-trip property that reading a registration cannot. A `result gating` family for
+MCP would need the same shape of invitation on the MCP side — a fact about which tools are safe,
+never a flag saying to run the tests.
 
 Note that **three of the four need no capability**. That is the point of the design: a server with no
 OAuth — or one whose consumer cannot express a session, say a Go service with no Node-side session

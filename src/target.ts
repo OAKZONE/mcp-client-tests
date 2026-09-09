@@ -195,6 +195,34 @@ export interface AuthorizationCapability {
 }
 
 /**
+ * One tool of yours that is safe to call, and arguments it accepts.
+ *
+ * **This is a fact about the tool, not a switch on the tests.** Executing a tool is the only way to
+ * see the shapes an implementer touches on every call, and the only way to check that what a result
+ * reports for a parameter is something that parameter accepts. Neither is reachable by reading a
+ * registration. But a package cannot invite itself to run somebody's code, so naming a tool here is
+ * the deployment saying "this one performs no side effect, and these arguments are valid for it" —
+ * the same shape as naming the consent screen's form id.
+ *
+ * **It is called more than once per run.** Every published argument encoding is attempted against
+ * it, because which ones a browser accepts is the finding. Name only tools that are safe to call
+ * repeatedly, and expect them to be called on every conformance run.
+ */
+export interface WebMcpToolCall {
+  /** The path, from {@link WebMcpCapability.toolPages}, that registers the tool. */
+  readonly page: string;
+  /** The registered tool's name, exactly as the page registers it. */
+  readonly tool: string;
+  /**
+   * Arguments the tool accepts.
+   *
+   * They must be arguments the tool would honour. A call the tool itself refuses says nothing about
+   * the browser's argument encoding, which is what the attempt is there to find out.
+   */
+  readonly arguments: Readonly<Record<string, unknown>>;
+}
+
+/**
  * A deployment that also serves pages publishing WebMCP tools.
  *
  * **WebMCP is not MCP.** It is the browser API that lets a page hand its own functions to an
@@ -206,12 +234,19 @@ export interface AuthorizationCapability {
  * deployment in exactly the way {@link AuthorizationCapability} is. It does not say "run the WebMCP
  * tests"; a page list is something a server either has or does not.
  *
- * **What gets checked, and what cannot be.** The package fetches each page over the same transport
+ * **What gets checked without a browser.** The package fetches each page over the same transport
  * every other suite uses and reads the *declarative* tools out of the served HTML — forms carrying
  * `toolname`, `tooldescription` and `toolparamdescription`. The *imperative* API
  * (`document.modelContext.registerTool`) is a JavaScript call that never crosses a socket, so no
- * assertion here can reach it; the suite says so out loud rather than reporting a page with only
- * imperative tools as having none.
+ * assertion in that suite can reach it; it says so out loud rather than reporting a page with only
+ * imperative tools as having none. What *does* arrive on the response is the origin-trial token that
+ * decides whether a stock browser has the API at all, so reachability is checked there too.
+ *
+ * **What needs one.** Whether a registration landed, whether a document released its tools on the
+ * way out, and — with {@link toolCalls} — what `executeTool` accepts and whether a result reports
+ * values its own schema would take back. Those suites are named explicitly by a consumer who wants
+ * them, because they need a Chrome on the machine and a missing browser is not a finding about a
+ * server.
  */
 export interface WebMcpCapability {
   /**
@@ -221,6 +256,13 @@ export interface WebMcpCapability {
    * server, when it is really a finding about the crawler's reach.
    */
   readonly toolPages: readonly string[];
+  /**
+   * Tools that are safe to call, and arguments they accept — see {@link WebMcpToolCall}.
+   *
+   * Omit it and nothing is executed: the execution suite then records what it could not observe
+   * rather than passing on a surface it never touched.
+   */
+  readonly toolCalls?: readonly WebMcpToolCall[];
   /**
    * A cookie proving a signed-in viewer, when the tool pages are behind a session.
    *

@@ -11,7 +11,7 @@
  * | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
  * | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates — `server/discover`, no session, caching hints, legal tool names, both error channels? |
  * | `tool-surface` | — | Will a client's gate actually let those tools run — annotated, titled, named inside the client budget, read split from write, and no description a scanner reads as an attack? |
- * | `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states — described tools, unique names, consent kept out of an attribute? |
+ * | `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states — described tools, unique names, consent kept out of an attribute? Can a visitor's browser reach the API at all, does a document release its tools when it goes away, and does a tool's result report values its own schema accepts? |
  *
  * **`protocol` and `tool-surface` judge the same list against different authorities**, which is why
  * they are two families rather than one. `protocol` asks whether the surface satisfies the
@@ -75,5 +75,7 @@ export {
 export {
   defineWebMcpConformanceSuites,
   defineWebMcpDeclarativeSuite,
+  defineWebMcpExecutionSuite,
   defineWebMcpImperativeSuite,
+  defineWebMcpReachabilitySuite,
 } from "./webmcp/index.js";

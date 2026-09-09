@@ -1,5 +1,129 @@
 # Changelog
 
+## v0.9.0 — WebMCP past the registration: whether a visitor can reach it, whether a document lets go, and the two shapes every caller touches
+
+The WebMCP family until now asked one question: are the tools on your pages **declared** the way the
+draft states. A page can pass that, register perfectly, and still be reachable by nobody — because
+in a stock production browser `document.modelContext` exists only where the response carried an
+origin-trial token, and reachability fails independently of registration while looking identical
+from the page.
+
+This release adds the three things reading a registration cannot see: whether the API can exist for
+a visitor at all, whether a document releases its tools when it goes away, and the shapes a caller
+touches on **every single call**.
+
+### Added — `webmcp` reachability, registered by default
+
+`defineWebMcpConformanceSuites` now registers a second suite alongside the declarative one. It needs
+no browser: a trial token arrives on the response like any other header, so it is read from the
+`Origin-Trial` header or a `<meta http-equiv="origin-trial">`, decoded, and checked against the
+origin it enrols and the clock.
+
+**This is the part to read before you bump.** It can turn a green run red, and only in one way: a
+token that is *served and cannot work* — expired, or issued for another origin. That is a deployment
+which believes it is enrolled and is not, and every tool on it is silently unreachable for every
+visitor who has not set a flag. A page serving **no** token is not failed; that is an advisory,
+because reaching it with `chrome://flags/#enable-webmcp-testing` is a legitimate arrangement.
+
+Every page is also fetched **twice**, differing only by a cookie your deployment has never heard of.
+The token is read from *the response that carried it*, so a response served without it has no WebMCP
+— which makes a header attached to a rule that can decline to match an outage for exactly the
+visitors that rule declines, and for nobody else. A real deployment attached one to a rule that also
+carried cache conditions: it would have been dead for exactly the visitors holding one particular
+cookie, and perfect for every developer who ever loaded the page. One fetch cannot see that.
+
+The token's expiry is recorded as an advisory whether or not anything is wrong, because the day it
+passes Chrome starts ignoring it, nothing in your code changes, nothing errors, and every tool goes
+quiet.
+
+### Added — `defineWebMcpExecutionSuite`, opt-in, and the first suite that calls your tools
+
+Nothing shipped before this ever called a tool, so nothing touched how `inputSchema` is encoded or
+what `executeTool` accepts — the two shapes every caller meets on every call.
+
+**It reports those shapes rather than requiring one, and the report is the deliverable.** The draft
+carries both answers itself: its IDL types `RegisteredTool.inputSchema` as an `object`, its
+supporting concepts as that object stringified. The shipping implementation diverges again on the
+`executeTool` argument — `webmachinelearning/webmcp#287`, with #278 and #279, reproduced first-hand
+in stock Chrome 151.0.7922.138: `executeTool(tool, {…})` threw `UnknownError: Failed to parse input
+arguments` where the JSON-string form succeeded. Requiring either encoding would fail correct pages
+on some browser, so the assertions cover only what both readings agree on — a schema that parses,
+and *some* published encoding accepted — and the advisories record which ones this browser used.
+
+It also checks a property that is not about WebMCP at all: **every value a tool's result reports for
+a parameter must be a value that parameter accepts.** A surface can print a filter as `on`, publish
+`{"type":"boolean"}` for it, and accept `"true"` in its handler — three spellings, each internally
+consistent, and a model that copies the printed value back earns a refusal for doing exactly what
+the payload invited. It survives ordinary testing because every test asserts the producer's output
+against a literal instead of feeding it back through the consumer. A refusal is reported only where
+the schema is unambiguous — a `type`, an `enum`, a `const`, a bound, a pattern; a schema carrying
+`anyOf`, `oneOf`, `allOf`, `not` or `$ref` is not judged at all.
+
+**It calls your code, so you name what it may call**, in the new optional `webMcp.toolCalls`. That
+is a fact about the tool — "this one performs no side effect and these arguments are valid for it" —
+in the same shape as naming your consent screen's form id, never a flag saying to run the tests.
+Each named tool is called **more than once per run**, because every published argument encoding is
+attempted whatever the first one does. Declare none and nothing is executed: the run then records
+what it could not observe rather than passing on a surface it never touched.
+
+Like `defineWebMcpImperativeSuite`, it is **not** auto-registered — it needs `playwright-core` and a
+Chrome on the machine, and a missing browser is not a finding about your server.
+
+### Added — a registration that outlives its document, in the imperative suite
+
+There is no `unregisterTool`. A registration is taken back by aborting the `AbortSignal` given to
+`registerTool`, which is what a document going away does for you. When that does not happen the
+failure is silent and cumulative: nothing errors, and every page a visitor opens adds to what the
+last one left behind, until the agent's list is mostly tools it can no longer call.
+
+Every other assertion in the family opens a fresh tab per page, so each reading starts from nothing
+and the leak is structurally invisible. The imperative suite now also walks your declared pages in
+**one tab** and reads what is live after each navigation — by name, and by count for the case where
+two pages register the same names. Declare two pages and it becomes observable; declare one and the
+run says so rather than passing quietly.
+
+### Added — clauses, all graded at the call site
+
+`INPUT_SCHEMA_SHAPE`, `EXECUTE_TOOL` and `PER_DOCUMENT_LIFETIME` are `strong` and therefore
+assertable. `EXECUTION_SHAPE_DIVERGENCE`, `DEVTOOLS_PANE_IS_NOT_EVIDENCE` and
+`ORIGIN_TRIAL_TOKEN_PAYLOAD` are `moderate`, and `DOCUMENT_TOOL_CEILING` — the community report of a
+ceiling near 296 tools past which WebMCP stops working for the whole document — is `thin`. None of
+the graded ones can fail your build; they reach you only through `advise()`, printed with the grade
+and the caveat beside them.
+
+`ORIGIN_TRIAL_DELIVERY` is `strong`, from Chrome's own origin-trials documentation, and is what the
+two reachability assertions cite.
+
+### Added — exports
+
+`WebMcpToolCall`; `defineWebMcpExecutionSuite` and `defineWebMcpReachabilitySuite`; the pure units
+behind them from `harness/webmcp-execution.js`, `harness/webmcp-lifetime.js` and
+`harness/webmcp-origin-trial.js`; `ToolExecutionReading`, and `readSequence` / `execute` on
+`WebMcpBrowserSession`.
+
+### Fixed — a reserved canonical origin is no longer reported as a misissued token
+
+**Found by running the new suite against a real consumer, which is the only place it could have been
+found.** This package tells you to drive your deployment under an unroutable canonical origin — the
+documented example is `https://my-server.test` — so the issuer stays HTTPS and port-free while the
+socket stays on loopback. No origin trial can ever be registered for a name that never resolves, so
+a deployment serving its *production* trial token under that origin was failed for a mismatch that
+was a property of the run's own choice of origin, not of the deployment. That is the one output a
+conformance package must never produce, and it would have failed every correct consumer who serves a
+token.
+
+The origin is now left unjudged when the page's own origin is unroutable (RFC 6761 `test.`,
+`localhost.`, `invalid.`, and the loopback literals), and an advisory records that it was not
+checked and what to check by hand instead. **Expiry and the third-party flag are still asserted
+there**, because neither depends on which origin the run chose, and the conditional-delivery check —
+the more valuable of the two — was never affected. `example.com` stays judgeable: RFC 6761 reserves
+it for documentation, not for non-resolution.
+
+New `originCanHoldTrialToken` export, and `IETF.RESERVED_UNROUTABLE_NAMES`.
+
+`WebMcpCapability`'s documentation had also become detached from the interface it documents, so
+editors showed the type undocumented and its `{@link toolCalls}` reference resolved against nothing.
+
 ## v0.8.0 — The client gate: why an authorized tool still does not run, and an evidence grade that decides what may fail you
 
 Everything this package asserted until now answered one of two questions: can a client **reach**

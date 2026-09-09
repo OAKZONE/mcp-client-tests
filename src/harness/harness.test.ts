@@ -56,6 +56,27 @@ import {
   undescribedParameters,
 } from "./webmcp-surface.js";
 import { startCanonicalProxy } from "./webmcp-browser.js";
+import {
+  acceptedEncodings,
+  executionProblem,
+  executionResultPayloads,
+  inputSchemaEncoding,
+  parseInputSchema,
+  registeredToolSchemaProblem,
+  reportedParameterValues,
+  roundTripViolations,
+  schemaProperties,
+  schemaRefusal,
+} from "./webmcp-execution.js";
+import { leakedRegistrations } from "./webmcp-lifetime.js";
+import {
+  conditionalDeliveryProblem,
+  decodeOriginTrialToken,
+  originCanHoldTrialToken,
+  originTrialCoverage,
+  originTrialProblem,
+  servedOriginTrialTokens,
+} from "./webmcp-origin-trial.js";
 import { createLoopbackTlsMaterial } from "./tls-certificate.js";
 import { wellKnownInsertion } from "./vendor-profile.js";
 import { cite, offers, reports, IETF, MCP, VENDOR } from "./specifications.js";
@@ -89,6 +110,22 @@ function fakeResponse(headers: Record<string, string>): WireResponse {
     text: () => "",
     json: <T,>() => ({}) as T,
   };
+}
+
+/**
+ * Build an origin-trial token the way one is laid out: a version byte, a signature, a big-endian
+ * payload length, and the JSON payload.
+ *
+ * The signature is filler. Nothing in this package verifies one — that is the browser's job, and it
+ * holds the key — so a fixture only has to be shaped like a token to exercise the reader.
+ */
+function makeOriginTrialToken(payload: Record<string, unknown>): string {
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  const token = Buffer.alloc(69 + body.byteLength);
+  token[0] = 3;
+  token.writeUInt32BE(body.byteLength, 65);
+  body.copy(token, 69);
+  return token.toString("base64");
 }
 
 describe("wellKnownInsertion", () => {
@@ -1311,5 +1348,482 @@ describe("client gates", () => {
 
   it("names the surface with no approval gate at all, which is the design constraint", () => {
     expect(unannotatedConsequences()).toContain("Messages API");
+  });
+});
+
+describe("inputSchemaEncoding and parseInputSchema", () => {
+  // The draft carries both answers: its IDL types `inputSchema` as an object, its supporting
+  // concepts as that object stringified. Neither is a defect, and the suite reports which it met.
+  const schema = { type: "object", properties: { q: { type: "string" } } };
+
+  it("reads an object schema as the IDL types it", () => {
+    expect(inputSchemaEncoding(schema)).toBe("object");
+    expect(parseInputSchema(schema)).toEqual(schema);
+  });
+
+  it("reads a stringified schema, which is the other shape the same draft describes", () => {
+    expect(inputSchemaEncoding(JSON.stringify(schema))).toBe("json-string");
+    expect(parseInputSchema(JSON.stringify(schema))).toEqual(schema);
+  });
+
+  it("separates a string that is not a schema from one that is", () => {
+    expect(inputSchemaEncoding("an object with a query")).toBe("opaque-string");
+    expect(parseInputSchema("an object with a query")).toBeUndefined();
+  });
+
+  it("reports an absent schema rather than inventing an empty one", () => {
+    expect(inputSchemaEncoding(undefined)).toBe("absent");
+    expect(inputSchemaEncoding(null)).toBe("absent");
+    expect(parseInputSchema(undefined)).toBeUndefined();
+  });
+});
+
+describe("registeredToolSchemaProblem", () => {
+  it("accepts either encoding, because the encoding is not the defect", () => {
+    expect(registeredToolSchemaProblem({ type: "object" })).toBeUndefined();
+    expect(registeredToolSchemaProblem(JSON.stringify({ type: "object" }))).toBeUndefined();
+  });
+
+  it("reports a tool publishing no schema at all", () => {
+    expect(registeredToolSchemaProblem(undefined)).toContain("no `inputSchema`");
+  });
+
+  it("reports a schema string a caller could not parse", () => {
+    expect(registeredToolSchemaProblem("[object Object]")).toContain("does not parse");
+  });
+
+  it("reports a schema whose properties are not an object", () => {
+    expect(registeredToolSchemaProblem({ type: "object", properties: ["q"] })).toContain("`properties`");
+  });
+});
+
+describe("schemaProperties", () => {
+  it("reads each property's own schema by name", () => {
+    const properties = schemaProperties({
+      type: "object",
+      properties: { active: { type: "boolean" }, label: { type: "string" } },
+    });
+
+    expect([...properties.keys()]).toEqual(["active", "label"]);
+    expect(properties.get("active")).toEqual({ type: "boolean" });
+  });
+
+  it("returns nothing for a schema that declares no properties", () => {
+    expect(schemaProperties({ type: "object" }).size).toBe(0);
+    expect(schemaProperties(undefined).size).toBe(0);
+  });
+});
+
+describe("schemaRefusal", () => {
+  it("refuses the display spelling of a boolean, which is the round trip that fails in the wild", () => {
+    // A surface prints `on`, publishes `{"type":"boolean"}`, and accepts `"true"`. Each part is
+    // self-consistent; a model copying the printed value back earns a refusal for doing as invited.
+    expect(schemaRefusal({ type: "boolean" }, "on")).toContain("does not accept the string");
+  });
+
+  it("refuses a value outside a declared enum, naming the spelling as the difference", () => {
+    const refusal = schemaRefusal({ enum: ["open", "closed"] }, "Open");
+
+    expect(refusal).toContain("does not accept");
+    expect(refusal).toContain("spelling");
+  });
+
+  it("accepts an integer where a number is declared, and refuses the reverse spelling", () => {
+    expect(schemaRefusal({ type: "number" }, 3)).toBeUndefined();
+    expect(schemaRefusal({ type: "integer" }, 3.5)).toContain("does not accept");
+    expect(schemaRefusal({ type: "string" }, 3)).toContain("does not accept");
+  });
+
+  it("reads a union of types as the union", () => {
+    expect(schemaRefusal({ type: ["string", "null"] }, null)).toBeUndefined();
+  });
+
+  it("refuses a value outside a declared bound or pattern", () => {
+    expect(schemaRefusal({ type: "integer", minimum: 1 }, 0)).toContain("minimum");
+    expect(schemaRefusal({ type: "string", pattern: "^[a-z]+$" }, "Mixed")).toContain("pattern");
+  });
+
+  it("judges nothing at all when the schema carries a combinator", () => {
+    // A partial evaluation of `anyOf` is how a gate starts failing pages that are correct, and a
+    // gate that fails correct pages gets switched off, taking every true finding with it.
+    expect(schemaRefusal({ anyOf: [{ type: "string" }, { type: "boolean" }] }, 7)).toBeUndefined();
+    expect(schemaRefusal({ $ref: "#/definitions/status" }, 7)).toBeUndefined();
+  });
+
+  it("judges nothing when the schema declares no constraint it can read", () => {
+    expect(schemaRefusal({ description: "a filter" }, "on")).toBeUndefined();
+  });
+
+  it("treats an unparseable pattern as no judgement rather than a refusal", () => {
+    expect(schemaRefusal({ type: "string", pattern: "([" }, "anything")).toBeUndefined();
+  });
+});
+
+describe("reportedParameterValues and roundTripViolations", () => {
+  const properties = schemaProperties({
+    type: "object",
+    properties: { active: { type: "boolean" }, status: { enum: ["open", "closed"] } },
+  });
+
+  it("finds a parameter's value wherever the result publishes it under that name", () => {
+    const found = reportedParameterValues(
+      { data: { rows: [{ active: "on", status: "open" }] } },
+      properties.keys(),
+    );
+
+    expect(found.map((entry) => entry.path)).toEqual([
+      "$.data.rows[0].active",
+      "$.data.rows[0].status",
+    ]);
+  });
+
+  it("names the value a model would copy back and the schema would then refuse", () => {
+    const violations = roundTripViolations(
+      properties,
+      reportedParameterValues({ active: "on", status: "open" }, properties.keys()),
+    );
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("$.active");
+    expect(violations[0]).toContain("`active`");
+  });
+
+  it("finds nothing when the result reports the values its own schema declares", () => {
+    expect(
+      roundTripViolations(
+        properties,
+        reportedParameterValues({ active: true, status: "closed" }, properties.keys()),
+      ),
+    ).toEqual([]);
+  });
+
+  it("stops at a bounded depth rather than walking a payload without end", () => {
+    let deep: Record<string, unknown> = { active: "on" };
+    for (let level = 0; level < 40; level += 1) deep = { nested: deep };
+
+    expect(reportedParameterValues(deep, properties.keys())).toEqual([]);
+  });
+});
+
+describe("executionResultPayloads", () => {
+  it("parses the stringified result the draft says comes back", () => {
+    expect(executionResultPayloads(JSON.stringify({ active: true }))).toEqual([{ active: true }]);
+  });
+
+  it("keeps a result that is not JSON, rather than dropping what the model still reads", () => {
+    expect(executionResultPayloads("2 rows matched")).toEqual(["2 rows matched"]);
+  });
+
+  it("unwraps text parts, which is where the values usually are", () => {
+    const payloads = executionResultPayloads({
+      content: [{ type: "text", text: JSON.stringify({ active: "on" }) }],
+    });
+
+    expect(payloads).toHaveLength(2);
+    expect(payloads[1]).toEqual({ active: "on" });
+  });
+});
+
+describe("acceptedEncodings and executionProblem", () => {
+  it("records which encoding worked without requiring either", () => {
+    const attempts = [
+      { encoding: "object" as const, accepted: false, error: "UnknownError: Failed to parse input arguments" },
+      { encoding: "json-string" as const, accepted: true, result: "{}" },
+    ];
+
+    expect(acceptedEncodings(attempts)).toEqual(["json-string"]);
+    expect(executionProblem(attempts)).toBeUndefined();
+  });
+
+  it("reports a registered tool that refused every published spelling, quoting both rejections", () => {
+    const problem = executionProblem([
+      { encoding: "object", accepted: false, error: "UnknownError: Failed to parse input arguments" },
+      { encoding: "json-string", accepted: false, error: "TypeError: not an object" },
+    ]);
+
+    expect(problem).toContain("UnknownError");
+    expect(problem).toContain("TypeError");
+  });
+
+  it("says nothing when no attempt was made, which is not the same as a failure", () => {
+    expect(executionProblem([])).toBeUndefined();
+  });
+});
+
+describe("leakedRegistrations", () => {
+  const solo = new Map([
+    ["/a", ["alpha", "beta"]],
+    ["/b", ["gamma"]],
+  ]);
+
+  it("finds nothing when each document releases its tools on the way out", () => {
+    expect(
+      leakedRegistrations(
+        [
+          { path: "/a", toolNames: ["alpha", "beta"] },
+          { path: "/b", toolNames: ["gamma"] },
+        ],
+        solo,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names the tool from a document already left that is still registered", () => {
+    const leaks = leakedRegistrations(
+      [
+        { path: "/a", toolNames: ["alpha", "beta"] },
+        { path: "/b", toolNames: ["gamma", "alpha", "beta"] },
+      ],
+      solo,
+    );
+
+    expect(leaks).toHaveLength(1);
+    expect(leaks[0]).toContain("`alpha`");
+    expect(leaks[0]).toContain("/b");
+  });
+
+  it("catches a leak the names alone hide, by counting", () => {
+    // Two pages registering the same name is the case a name comparison cannot see; six live where
+    // three are registered is still six.
+    const leaks = leakedRegistrations(
+      [
+        { path: "/a", toolNames: ["shared"] },
+        { path: "/a", toolNames: ["shared", "shared"] },
+      ],
+      new Map([["/a", ["shared"]]]),
+    );
+
+    expect(leaks[0]).toContain("outlived an earlier document");
+  });
+
+  it("skips a page it was never shown on its own, rather than guessing what it registers", () => {
+    expect(
+      leakedRegistrations(
+        [
+          { path: "/a", toolNames: ["alpha"] },
+          { path: "/unknown", toolNames: ["alpha", "beta", "gamma"] },
+        ],
+        new Map([["/a", ["alpha"]]]),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("servedOriginTrialTokens", () => {
+  it("reads the header form, splitting a response that carries several", () => {
+    const served = servedOriginTrialTokens(new Headers({ "origin-trial": "first, second" }), "");
+
+    expect(served).toEqual([
+      { delivery: "header", token: "first" },
+      { delivery: "header", token: "second" },
+    ]);
+  });
+
+  it("reads the meta form, whatever order the attributes are written in", () => {
+    const served = servedOriginTrialTokens(
+      new Headers(),
+      `<meta content="tok" http-equiv="origin-trial">`,
+    );
+
+    expect(served).toEqual([{ delivery: "meta", token: "tok" }]);
+  });
+
+  it("ignores a meta element that is not an origin trial", () => {
+    expect(
+      servedOriginTrialTokens(new Headers(), `<meta http-equiv="content-type" content="text/html">`),
+    ).toEqual([]);
+  });
+});
+
+describe("decodeOriginTrialToken", () => {
+  it("reads the origin, feature, expiry and subdomain flag out of a token", () => {
+    const payload = decodeOriginTrialToken(
+      makeOriginTrialToken({
+        origin: "https://example.com:443",
+        feature: "WebMCP",
+        expiry: 4102444800,
+        isSubdomain: true,
+      }),
+    );
+
+    expect(payload?.origin).toBe("https://example.com:443");
+    expect(payload?.feature).toBe("WebMCP");
+    expect(payload?.isSubdomain).toBe(true);
+    expect(payload?.expiry.toISOString()).toBe("2100-01-01T00:00:00.000Z");
+  });
+
+  it("returns nothing for a token it does not understand, which is never a finding about a server", () => {
+    // The layout is read back from live tokens rather than from a published document, so anything
+    // unfamiliar has to degrade to "unread" — a parser artefact reported as somebody's defect is
+    // the one output a conformance package must never produce.
+    expect(decodeOriginTrialToken("not-a-token")).toBeUndefined();
+    expect(decodeOriginTrialToken("")).toBeUndefined();
+  });
+});
+
+describe("originTrialCoverage", () => {
+  const token = (origin: string, isSubdomain: boolean) => ({
+    version: 3,
+    origin,
+    feature: "WebMCP",
+    expiry: new Date("2100-01-01T00:00:00.000Z"),
+    isSubdomain,
+    isThirdParty: false,
+  });
+
+  it("matches the exact origin, port spelled out or not", () => {
+    expect(originTrialCoverage(token("https://example.com:443", false), "https://example.com")).toBe(
+      "exact",
+    );
+  });
+
+  it("covers a subdomain only when the token says it does", () => {
+    expect(originTrialCoverage(token("https://example.com", true), "https://app.example.com")).toBe(
+      "subdomain",
+    );
+    expect(originTrialCoverage(token("https://example.com", false), "https://app.example.com")).toBe(
+      "mismatch",
+    );
+  });
+
+  it("does not let a subdomain token reach a different registrable name", () => {
+    expect(
+      originTrialCoverage(token("https://example.com", true), "https://notexample.com"),
+    ).toBe("mismatch");
+  });
+});
+
+describe("originCanHoldTrialToken", () => {
+  it("accepts an origin a trial could actually be registered for", () => {
+    expect(originCanHoldTrialToken("https://example.com")).toBe(true);
+    expect(originCanHoldTrialToken("https://app.example.com:8443")).toBe(true);
+  });
+
+  it("refuses the reserved names that never reach the DNS", () => {
+    expect(originCanHoldTrialToken("https://my-server.test")).toBe(false);
+    expect(originCanHoldTrialToken("https://thing.localhost")).toBe(false);
+    expect(originCanHoldTrialToken("https://whatever.invalid")).toBe(false);
+  });
+
+  it("refuses the loopback interface however the URL spells it", () => {
+    expect(originCanHoldTrialToken("http://localhost:3000")).toBe(false);
+    expect(originCanHoldTrialToken("http://127.0.0.1:3000")).toBe(false);
+    expect(originCanHoldTrialToken("http://[::1]:3000")).toBe(false);
+  });
+
+  it("keeps the documentation names judgeable, because they resolve", () => {
+    // RFC 6761 reserves `example.com` for documentation, not for non-resolution. The property this
+    // predicate exists for is "no trial can name it", and that does not hold here.
+    expect(originCanHoldTrialToken("https://example.com")).toBe(true);
+  });
+
+  it("refuses an origin it cannot parse rather than guessing at it", () => {
+    expect(originCanHoldTrialToken("not-an-origin")).toBe(false);
+  });
+});
+
+describe("originTrialProblem", () => {
+  const valid = makeOriginTrialToken({
+    origin: "https://example.com",
+    feature: "WebMCP",
+    expiry: 4102444800,
+  });
+  const expired = makeOriginTrialToken({
+    origin: "https://example.com",
+    feature: "WebMCP",
+    expiry: 1600000000,
+  });
+  const now = new Date("2026-09-06T00:00:00.000Z");
+
+  it("says nothing when a served token still enrols this origin", () => {
+    expect(
+      originTrialProblem([{ delivery: "header", token: valid }], "https://example.com", now),
+    ).toBeUndefined();
+  });
+
+  it("names an expired token, which Chrome ignores and the deployment cannot see", () => {
+    const problem = originTrialProblem(
+      [{ delivery: "header", token: expired }],
+      "https://example.com",
+      now,
+    );
+
+    expect(problem).toContain("expired");
+  });
+
+  it("passes when one of several tokens works, as Chrome takes the first valid one", () => {
+    expect(
+      originTrialProblem(
+        [
+          { delivery: "header", token: expired },
+          { delivery: "meta", token: valid },
+        ],
+        "https://example.com",
+        now,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("names a token issued for somebody else's origin", () => {
+    // A routable name on purpose: a reserved one could never hold a token of its own, so the
+    // mismatch there is unjudgeable rather than a finding.
+    expect(
+      originTrialProblem([{ delivery: "header", token: valid }], "https://somebody-else.com", now),
+    ).toContain("does not cover");
+  });
+
+  it("says nothing when no token was served, which is a different finding", () => {
+    expect(originTrialProblem([], "https://example.com", now)).toBeUndefined();
+  });
+
+  it("says nothing when no token could be read, rather than blaming the server for the parser", () => {
+    expect(
+      originTrialProblem([{ delivery: "header", token: "unreadable" }], "https://example.com", now),
+    ).toBeUndefined();
+  });
+
+  it("does not fail a production token judged against a reserved canonical origin", () => {
+    // The shape every consumer runs in: the deployment is driven under an RFC 6761 name so the
+    // issuer stays HTTPS and unroutable, while the response carries the token production serves.
+    // No trial token can ever name a `.test` origin, so failing here would fail every correct
+    // deployment that serves one — a harness artefact reported as somebody's defect.
+    const production = makeOriginTrialToken({
+      origin: "https://example.com:443",
+      feature: "WebMCP",
+      expiry: 4102444800,
+      isSubdomain: true,
+    });
+
+    expect(
+      originTrialProblem([{ delivery: "header", token: production }], "https://my-server.test", now),
+    ).toBeUndefined();
+  });
+
+  it("still names an expired token under a reserved origin, because the clock is judgeable", () => {
+    expect(
+      originTrialProblem([{ delivery: "header", token: expired }], "https://my-server.test", now),
+    ).toContain("expired");
+  });
+});
+
+describe("conditionalDeliveryProblem", () => {
+  const token = (value: string) => [{ delivery: "header" as const, token: value }];
+
+  it("says nothing when both responses carry the same token", () => {
+    expect(conditionalDeliveryProblem(token("t"), token("t"))).toBeUndefined();
+  });
+
+  it("says nothing when neither carries one, which the advisory covers instead", () => {
+    expect(conditionalDeliveryProblem([], [])).toBeUndefined();
+  });
+
+  it("catches the token withheld from a request carrying an unrelated cookie", () => {
+    // The shape of a real incident: the header rode on a rule that also carried cache conditions,
+    // so it would have been absent for exactly the visitors holding one particular cookie.
+    expect(conditionalDeliveryProblem(token("t"), [])).toContain("withheld from one carrying");
+  });
+
+  it("catches the reverse, which is the same defect seen from the other side", () => {
+    expect(conditionalDeliveryProblem([], token("t"))).toContain("withheld from a plain request");
   });
 });

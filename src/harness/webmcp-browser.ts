@@ -44,6 +44,7 @@ import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { createLoopbackTlsMaterial } from "./tls-certificate.js";
+import type { ExecutionAttempt } from "./webmcp-execution.js";
 
 /** How to find a browser, when the defaults do not. */
 export interface WebMcpBrowserOptions {
@@ -184,6 +185,23 @@ export interface RegisteredToolReading {
   readonly tools: readonly RegisteredWebMcpTool[];
 }
 
+/** What one attempt to call a registered tool through the browser produced. */
+export interface ToolExecutionReading {
+  readonly path: string;
+  /** The tool the caller asked for. */
+  readonly tool: string;
+  readonly apiPresent: boolean;
+  readonly toolSurface: string;
+  /** Whether a tool of that name was registered when the call was attempted. */
+  readonly registered: boolean;
+  /** What was registered instead, when the requested tool was not there. */
+  readonly registeredNames: readonly string[];
+  /** Whether the surface exposed an `executeTool` to call at all. */
+  readonly executorPresent: boolean;
+  /** One attempt per published argument encoding, in the order they were tried. */
+  readonly attempts: readonly ExecutionAttempt[];
+}
+
 /** A launched browser, and the pages read through it. */
 export interface WebMcpBrowserSession {
   /**
@@ -193,22 +211,63 @@ export interface WebMcpBrowserSession {
    * @returns What the page exposed.
    */
   read(path: string): Promise<RegisteredToolReading>;
+  /**
+   * Walk a sequence of paths in **one tab**, asking after each navigation what is live.
+   *
+   * This is the only arrangement in which a registration that outlived its own document can show
+   * up. {@link read} opens a fresh page per path, so every reading starts from nothing and a leak is
+   * structurally invisible; here the reading taken after the second navigation holds the second
+   * page's tools plus anything the first page failed to release.
+   *
+   * @param paths - Paths on the canonical origin, in the order to visit them.
+   * @returns One reading per path, taken after that navigation, in the same order.
+   */
+  readSequence(paths: readonly string[]): Promise<readonly RegisteredToolReading[]>;
+  /**
+   * Call one registered tool, once per published argument encoding.
+   *
+   * Both encodings are attempted whatever the first one does, because the useful output is the
+   * per-browser record of which are accepted, and one success says nothing about the other. The tool
+   * is therefore called more than once per run — which is why the capability that names it says it
+   * must be safe to call repeatedly.
+   *
+   * @param path - Path on the canonical origin that registers the tool.
+   * @param tool - The registered tool's name.
+   * @param args - The arguments to call it with.
+   * @returns What each attempt produced.
+   */
+  execute(
+    path: string,
+    tool: string,
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<ToolExecutionReading>;
   close(): Promise<void>;
 }
 
 /**
- * The script evaluated in the page: the same question an attached agent asks.
+ * Where the tool surface might be, in the order to try.
  *
  * **Three surfaces are probed, because the sources disagree about which exists.** The
  * specification's own IDL puts `getTools()` on `document.modelContext`. Chrome's testing flag is
  * documented as exposing a separate `navigator.modelContextTesting` for inspector tooling, and two
  * secondary sources name its reader differently — `getTools()` in one, `listTools()` in the other.
  *
- * Rather than pick a winner, this tries each in turn and reports which one answered. That turns a
- * documentation conflict into evidence collected on the machine actually running the suite, and it
- * means a Chrome release that moves the reader degrades to a named stop rather than to a page
+ * Rather than pick a winner, the scripts below try each in turn and report which one answered. That
+ * turns a documentation conflict into evidence collected on the machine actually running the suite,
+ * and it means a Chrome release that moves the reader degrades to a named stop rather than to a page
  * silently reported as registering nothing.
+ *
+ * Shared by every script this module evaluates, so reading a page and calling one of its tools can
+ * never end up disagreeing about where the surface is.
  */
+const SURFACE_CANDIDATES = `[
+    ["document.modelContext.getTools", document.modelContext, "getTools"],
+    ["navigator.modelContextTesting.getTools", navigator.modelContextTesting, "getTools"],
+    ["navigator.modelContextTesting.listTools", navigator.modelContextTesting, "listTools"],
+    ["navigator.modelContext.getTools", navigator.modelContext, "getTools"],
+  ]`;
+
+/** The script evaluated in the page: the same question an attached agent asks. */
 const READ_TOOLS = `(async () => {
   const shape = (tool) => ({
     name: tool.name,
@@ -216,12 +275,7 @@ const READ_TOOLS = `(async () => {
     inputSchema: tool.inputSchema,
     annotations: tool.annotations,
   });
-  const candidates = [
-    ["document.modelContext.getTools", document.modelContext, "getTools"],
-    ["navigator.modelContextTesting.getTools", navigator.modelContextTesting, "getTools"],
-    ["navigator.modelContextTesting.listTools", navigator.modelContextTesting, "listTools"],
-    ["navigator.modelContext.getTools", navigator.modelContext, "getTools"],
-  ];
+  const candidates = ${SURFACE_CANDIDATES};
   const apiPresent = candidates.some(([, host]) => Boolean(host));
   for (const [label, host, method] of candidates) {
     if (!host || typeof host[method] !== "function") continue;
@@ -237,6 +291,98 @@ const READ_TOOLS = `(async () => {
   }
   return { apiPresent, toolSurface: "none", tools: [] };
 })()`;
+
+/**
+ * The script that calls one tool, once per published argument encoding.
+ *
+ * **The tool object never leaves the page.** `executeTool` takes the `RegisteredTool` the surface
+ * handed out, and that object cannot be carried across the evaluation boundary and back — so the
+ * whole call, from finding the tool by name to catching the rejection, happens in the tab.
+ *
+ * Both encodings are attempted unconditionally. The draft types the argument as an `object`; the
+ * shipping implementation is reported to require a JSON string, and only the browser under test can
+ * settle which it is. A run that stopped at the first success would record half the answer, and half
+ * the answer is what lets a page ship built against the wrong one.
+ *
+ * The rejection is flattened to `Name: message` on the way out, because a `DOMException` does not
+ * survive serialization and its `name` is the part that identifies the failure.
+ *
+ * @param toolName - The registered tool to call.
+ * @param args - The arguments to call it with.
+ * @returns The script source.
+ */
+function executeToolScript(toolName: string, args: Readonly<Record<string, unknown>>): string {
+  // Embedded as a JSON string and parsed in the page, so no argument value can terminate the
+  // literal or change the meaning of the script around it.
+  const request = JSON.stringify(JSON.stringify({ tool: toolName, args }));
+  return `(async () => {
+  const request = JSON.parse(${request});
+  const candidates = ${SURFACE_CANDIDATES};
+  const apiPresent = candidates.some(([, host]) => Boolean(host));
+
+  let surface;
+  let tools = [];
+  for (const [label, host, method] of candidates) {
+    if (!host || typeof host[method] !== "function") continue;
+    try {
+      const registered = await host[method]();
+      if (!Array.isArray(registered)) continue;
+      surface = { label, host };
+      tools = registered;
+      break;
+    } catch (error) {
+      continue;
+    }
+  }
+
+  const base = {
+    apiPresent,
+    toolSurface: surface ? surface.label : "none",
+    registered: false,
+    registeredNames: tools.map((tool) => (tool && tool.name) || "(unnamed)"),
+    executorPresent: false,
+    attempts: [],
+  };
+  if (!surface) return base;
+
+  const tool = tools.find((candidate) => candidate && candidate.name === request.tool);
+  if (!tool) return base;
+
+  // The executor is normally the surface that listed the tools; a testing surface that lists but
+  // cannot call falls back to the document's own object rather than reporting the tool unreachable.
+  const executor =
+    typeof surface.host.executeTool === "function"
+      ? surface.host
+      : document.modelContext && typeof document.modelContext.executeTool === "function"
+        ? document.modelContext
+        : undefined;
+  if (!executor) return { ...base, registered: true };
+
+  const carry = (value) => {
+    if (typeof value === "string" || value === null || value === undefined) return value ?? null;
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+      return String(value);
+    }
+  };
+
+  const attempts = [];
+  for (const encoding of ["object", "json-string"]) {
+    const argument = encoding === "object" ? request.args : JSON.stringify(request.args);
+    try {
+      const result = await executor.executeTool(tool, argument);
+      attempts.push({ encoding, accepted: true, result: carry(result) });
+    } catch (error) {
+      const name = (error && error.name) || "Error";
+      const message = (error && error.message) || String(error);
+      attempts.push({ encoding, accepted: false, error: name + ": " + message });
+    }
+  }
+
+  return { ...base, registered: true, executorPresent: true, attempts };
+})()`;
+}
 
 /**
  * Load `playwright-core`, or say precisely what to do about its absence.
@@ -334,19 +480,57 @@ export async function openWebMcpBrowser(
   // per-run root. See this module's header.
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
 
+  /** Read one page in an already-open tab, so a caller can keep the tab across navigations. */
+  const readInto = async (page: PlaywrightPage, path: string): Promise<RegisteredToolReading> => {
+    const response = await page.goto(new URL(path, canonicalOrigin).toString(), {
+      waitUntil: "load",
+    });
+    const reading = await page.evaluate<{
+      apiPresent: boolean;
+      toolSurface: string;
+      tools: RegisteredWebMcpTool[];
+    }>(READ_TOOLS);
+    return { path, status: response?.status() ?? 0, ...reading };
+  };
+
   return {
     async read(path: string): Promise<RegisteredToolReading> {
       const page = await context.newPage();
       try {
-        const response = await page.goto(new URL(path, canonicalOrigin).toString(), {
-          waitUntil: "load",
-        });
+        return await readInto(page, path);
+      } finally {
+        await page.close();
+      }
+    },
+
+    async readSequence(paths: readonly string[]): Promise<readonly RegisteredToolReading[]> {
+      const page = await context.newPage();
+      try {
+        const readings: RegisteredToolReading[] = [];
+        for (const path of paths) readings.push(await readInto(page, path));
+        return readings;
+      } finally {
+        await page.close();
+      }
+    },
+
+    async execute(
+      path: string,
+      tool: string,
+      args: Readonly<Record<string, unknown>>,
+    ): Promise<ToolExecutionReading> {
+      const page = await context.newPage();
+      try {
+        await page.goto(new URL(path, canonicalOrigin).toString(), { waitUntil: "load" });
         const reading = await page.evaluate<{
           apiPresent: boolean;
           toolSurface: string;
-          tools: RegisteredWebMcpTool[];
-        }>(READ_TOOLS);
-        return { path, status: response?.status() ?? 0, ...reading };
+          registered: boolean;
+          registeredNames: string[];
+          executorPresent: boolean;
+          attempts: ExecutionAttempt[];
+        }>(executeToolScript(tool, args));
+        return { path, tool, ...reading };
       } finally {
         await page.close();
       }

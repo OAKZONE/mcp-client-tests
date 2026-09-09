@@ -25,12 +25,14 @@ import { readRunningDeployment, type RunningDeployment } from "../../harness/dep
 import { WEBMCP, cite } from "../../harness/specifications.js";
 import {
   openWebMcpBrowser,
-  WEBMCP_LAUNCH_ARGS,
   type RegisteredToolReading,
   type WebMcpBrowserOptions,
   type WebMcpBrowserSession,
 } from "../../harness/webmcp-browser.js";
+import { leakedRegistrations } from "../../harness/webmcp-lifetime.js";
 import type { McpTestTarget } from "../../target.js";
+
+import { assertWebMcpApiPresent } from "./browser-support.js";
 
 const SCOPE = "WebMCP registered tools (browser)";
 
@@ -53,6 +55,7 @@ export function defineWebMcpImperativeSuite(
     let deployment: RunningDeployment;
     let session: WebMcpBrowserSession | undefined;
     let readings: RegisteredToolReading[] = [];
+    let walk: readonly RegisteredToolReading[] = [];
 
     const capability = mcpTarget.webMcp ?? { toolPages: [] };
 
@@ -67,7 +70,12 @@ export function defineWebMcpImperativeSuite(
       for (const path of capability.toolPages) {
         readings.push(await session.read(path));
       }
-    }, 180_000);
+
+      // The same pages again, in one tab, without closing it in between. Everything above starts
+      // from a fresh document and therefore cannot see a registration that outlived one.
+      walk =
+        capability.toolPages.length >= 2 ? await session.readSequence(capability.toolPages) : [];
+    }, 240_000);
 
     afterAll(async () => {
       await session?.close();
@@ -77,32 +85,8 @@ export function defineWebMcpImperativeSuite(
     it("runs in a browser that exposes the WebMCP API", () => {
       // The hard stop that keeps every assertion below honest. A Chrome without the API returns an
       // empty tool list for every page, which is indistinguishable from a page that registers
-      // nothing — so this is checked first and named precisely.
-      const exposed = readings.filter((reading) => reading.apiPresent);
-
-      expect(
-        exposed.length,
-        cite(
-          WEBMCP.CHROME_ENABLEMENT,
-          "No page exposed a WebMCP object, so this browser does not have the API switched on and " +
-            "every reading below is empty for that reason rather than because your pages register " +
-            "nothing.\n" +
-            `  The suite launched Chrome with ${WEBMCP_LAUNCH_ARGS.join(" ")}, which is the ` +
-            "command-line spelling of `chrome://flags/#enable-webmcp-testing`. Chrome documents " +
-            "the flag itself (146.0.7672.0+) and the origin trial (Chrome 149+); it does not " +
-            "document the switch, so it may have been renamed.\n" +
-            "  Ways out, cheapest first:\n" +
-            "    1. Check the Chrome being launched is 149 or newer — `MCP_TESTS_CHROME_PATH` " +
-            "picks a specific binary, and an old stable build has no flag to set.\n" +
-            "    2. Enable it by hand at `chrome://flags/#enable-webmcp-testing` and confirm " +
-            "`document.modelContext` in that browser's console, then pass the switch that build " +
-            "uses via `launchArgs` or `MCP_TESTS_CHROME_ARGS`.\n" +
-            "    3. Serve an origin-trial token on these pages, which is what production does and " +
-            "needs no switch at all.\n" +
-            "    4. If the page needs a visible context, pass `headless: false`.\n" +
-            "  Confirm any of them in DevTools under Application → WebMCP.",
-        ),
-      ).toBeGreaterThan(0);
+      // nothing — so this is checked first, and named precisely in one shared place.
+      assertWebMcpApiPresent(readings);
     });
 
     it("serves every page the target declares as publishing tools", () => {
@@ -189,8 +173,44 @@ export function defineWebMcpImperativeSuite(
       ).toEqual([]);
     });
 
+    it("releases a page's tools when the document that registered them goes away", () => {
+      const leaks = leakedRegistrations(
+        walk
+          .filter((reading) => reading.status === 200 && reading.apiPresent)
+          .map((reading) => ({
+            path: reading.path,
+            toolNames: reading.tools.map((tool) => tool.name),
+          })),
+        new Map(
+          readings
+            .filter((reading) => reading.status === 200 && reading.apiPresent)
+            .map((reading) => [reading.path, reading.tools.map((tool) => tool.name)] as const),
+        ),
+      );
+
+      expect(
+        leaks,
+        cite(
+          WEBMCP.PER_DOCUMENT_LIFETIME,
+          "Tools live on a `Document`, and there is no `unregisterTool` — a registration is taken " +
+            "back by aborting the `AbortSignal` given to `registerTool`, which is what a document " +
+            "going away does for you. This run walked your declared pages in one tab and found " +
+            "tools from a document already left still registered afterwards.\n" +
+            "  The failure is silent and cumulative: nothing errors, and every page a visitor " +
+            "opens adds to what the last one left behind, until the agent's tool list is mostly " +
+            "entries it can no longer call. A suite that opens a fresh tab per page — including " +
+            "every other assertion in this file — cannot see it, because each reading starts from " +
+            "nothing.\n" +
+            "  Pass an `AbortSignal` to every `registerTool` call and abort it when the view that " +
+            "owns the tool goes away. If your pages are one document with client-side routing, " +
+            "that is the only mechanism there is: no navigation ever tears the registry down for " +
+            "you.",
+        ),
+      ).toEqual([]);
+    });
+
     it("records what the registered surface offers and does not say", () => {
-      collectAdvisories(readings);
+      collectAdvisories(readings, walk, capability.toolPages.length);
       expect(readings.length, "The `webMcp` capability declared no pages to load.").toBeGreaterThan(
         0,
       );
@@ -201,9 +221,47 @@ export function defineWebMcpImperativeSuite(
 /**
  * Record what the live tool surface exposes, and what the platform will not enforce for it.
  *
- * @param readings - What each page yielded.
+ * @param readings - What each page yielded, each in a document of its own.
+ * @param walk - The same pages read in one tab, when there were enough of them to navigate between.
+ * @param declaredPageCount - How many pages the capability declared.
  */
-function collectAdvisories(readings: readonly RegisteredToolReading[]): void {
+function collectAdvisories(
+  readings: readonly RegisteredToolReading[],
+  walk: readonly RegisteredToolReading[],
+  declaredPageCount: number,
+): void {
+  if (declaredPageCount < 2) {
+    advise(SCOPE, {
+      subject: "registration lifetime across a navigation",
+      finding:
+        `the capability declares ${declaredPageCount} tool page(s), so this run never navigated ` +
+        "between two of them and nothing observed whether a document releases its tools",
+      consequence:
+        "A registration that outlives its document is invisible to every reading above — each one " +
+        "opens a fresh tab, so it starts from nothing, while a visitor's session does not. Two " +
+        "declared pages are enough to see it. Until then the leak assertion inspected nothing and " +
+        "passed, which is not the same as a page that releases cleanly.",
+      source: WEBMCP.PER_DOCUMENT_LIFETIME,
+    });
+  } else {
+    const peak = Math.max(0, ...walk.map((reading) => reading.tools.length));
+    const registered = Math.max(0, ...readings.map((reading) => reading.tools.length));
+    advise(SCOPE, {
+      subject: "how many tools one document ends up holding",
+      finding:
+        `walking ${walk.length} page(s) in one tab, the live tool count peaked at ${peak}; the ` +
+        `busiest single page registers ${registered}`,
+      consequence:
+        "Recorded because there is nothing to feature-detect here and no published limit. The " +
+        "only number in circulation is a community report that somewhere near 296 registered " +
+        "tools stops WebMCP working for the entire document — no error, nothing thrown, the whole " +
+        "surface simply gone. Treat it as a reason to abort registrations you no longer need " +
+        "rather than as a budget to spend down: the number is not a fact, and the failure it " +
+        "describes is total.",
+      source: WEBMCP.DOCUMENT_TOOL_CEILING,
+    });
+  }
+
   const surfaces = [...new Set(readings.map((reading) => reading.toolSurface))].filter(
     (surface) => surface !== "none",
   );

@@ -89,7 +89,7 @@ with no OAuth still gets every family that does not need one.
 | `oauth` | `authorization` | Can each vendor's client authorize, refresh, and reconnect? |
 | `protocol` | — | Does the server answer revision `2026-07-28` in the shapes it mandates? |
 | `tool-surface` | — | Will a client's gate actually let those tools run — or drop, prompt, or refuse them? |
-| `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states? |
+| `webmcp` | `webMcp` | Do the pages that publish tools to an in-browser agent declare them the way the W3C draft states — and can a visitor's browser reach the API at all, does a document release its tools when it goes away, and does a tool's result report values its own schema accepts? |
 
 **`protocol` and `tool-surface` judge the same tool list against different authorities.** `protocol`
 asks whether the surface satisfies the specification. `tool-surface` asks what somebody else's
@@ -103,6 +103,22 @@ published in a page. The *declarative* API is served HTML and provable over the 
 `document.modelContext.registerTool(...)` is reached by an opt-in suite that drives a real Chrome
 through `playwright-core` — an optional peer dependency shipping no browser binaries — and is the
 only way to catch a page whose registration call never landed.
+
+Two more things only a real browser and a real call can reach, and both fail silently. A
+registration outliving the document that made it accumulates across a visitor's navigations with
+nothing thrown — invisible to any suite that opens a fresh tab per page, which is every other suite
+here. And the shapes a caller touches on **every** call are contested: the draft types
+`RegisteredTool.inputSchema` as an object in its IDL and as that object stringified in its supporting
+concepts, and the shipping implementation wants a JSON string where the draft's `executeTool` takes
+an object. The suite reports what the browser under test actually did rather than picking a winner,
+because a page built against one reading and tested against a stub of the same reading is green in
+its own suite and broken in front of every user.
+
+Reachability is separate from registration, and is checked without a browser: in a stock browser
+`document.modelContext` exists only where the response carried an origin-trial token, so the token is
+read, decoded, checked against the origin and the clock, and — since a response served without it has
+no WebMCP — fetched a second time behind an unrelated cookie, to catch a token that is served to some
+visitors and not others.
 
 Adding a family never changes an existing one. See **[docs/extending.md](docs/extending.md)**.
 

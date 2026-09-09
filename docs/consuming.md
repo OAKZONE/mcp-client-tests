@@ -303,6 +303,8 @@ webMcp: {
   viewerCookie: { name: "session", value: process.env.CONFORMANCE_SESSION! },
   // Only if your pages load their own scripts from another origin:
   scriptOrigins: ["https://cdn.example.com"],
+  // Only tools that are safe to call, repeatedly, with no side effect:
+  toolCalls: [{ page: "/orders", tool: "search-orders", arguments: { query: "widget" } }],
 },
 ```
 
@@ -327,7 +329,34 @@ no amount of driving a real browser reveals which spelling your page wrote. That
 CDN origin matters if your registration ships in a bundle.
 
 **It does not execute your page.** Whether `registerTool()` actually ran is not visible in text —
-that is the browser suite below.
+that is the browser suites below.
+
+**It also asks whether the API can exist for a visitor at all**, in a second suite registered by the
+same call and needing no browser either. In a stock production browser `document.modelContext` exists
+only where the response carried an **origin-trial token**, so a page can be perfectly written, its
+tools perfectly registered, and unreachable by everyone. That suite reads the token from the
+`Origin-Trial` response header or a `<meta http-equiv="origin-trial">`, decodes it, and reports the
+feature, the origin it enrols, and **the day it expires** — the day Chrome starts ignoring it, your
+code does not change, and every tool goes quiet.
+
+It fails only where a token is served and cannot work: expired, or issued for another origin. A page
+serving no token at all is an advisory, because reaching it with the flag is a legitimate
+arrangement.
+
+**The origin half is skipped when your canonical origin is unroutable**, which it usually is — the
+shape recommended above is `https://my-server.test`, and no origin trial can ever be registered for
+a name that never resolves. Your production token therefore names a different origin by necessity,
+and failing you for that would be reporting this package's own choice of origin as your defect. The
+expiry is still asserted, the conditional-delivery check is unaffected, and an advisory records that
+the origin went unchecked so you can confirm by hand that the token covers the origin you really
+serve on. Run with a routable `canonicalOrigin` and the origin is judged normally.
+
+**And it fetches every page twice**, differing only by a cookie your deployment has never heard of.
+The token is read from *the response that carried it*, so a response served without it has no WebMCP
+— which makes a header attached to a rule that can decline to match an outage for exactly the
+visitors that rule declines, and for nobody else. A real deployment attached one to a rule that also
+carried cache conditions: it would have been dead for exactly the visitors holding one particular
+cookie, and perfect for every developer who ever loaded the page. One fetch cannot see that.
 
 ### Driving a real browser — `defineWebMcpImperativeSuite`
 
@@ -356,6 +385,15 @@ are unique per document, and that **every page you declared in `toolPages` regis
 That last one is assertable precisely because you declared the page: registering nothing contradicts
 your own claim, and both readings of that contradiction are real findings.
 
+**It also walks your pages in a single tab**, which is the only arrangement where a registration that
+outlived its own document can be seen at all. There is no `unregisterTool`: a registration is taken
+back by aborting the `AbortSignal` you passed to `registerTool`, which is what a document going away
+does for you. When that does not happen the failure is silent and cumulative — nothing errors, and
+every page a visitor opens adds to what the last one left behind, until the agent's list is mostly
+tools it can no longer call. Every other assertion opens a fresh tab per page, so each starts from
+nothing and none of them can see it. Declare two pages and it becomes observable; declare one and the
+run says so rather than passing quietly.
+
 **Which reader it uses is discovered, not assumed.** The specification's IDL puts `getTools()` on
 `document.modelContext`; Chrome's testing flag is documented as exposing a separate
 `navigator.modelContextTesting`, whose reader two sources name differently (`getTools()` versus
@@ -380,6 +418,52 @@ silent skip.
 Under the hood it fronts your deployment with an HTTPS listener holding a certificate for your
 canonical host and points Chrome at it with `--host-resolver-rules`, so the page loads on the origin
 production serves — absolute URLs and all — and gets the secure context WebMCP requires.
+
+### Calling your tools — `defineWebMcpExecutionSuite`
+
+Nothing above ever calls a tool, so nothing above touches the two shapes a caller meets on **every
+single call** — how `inputSchema` is encoded, and what `executeTool` accepts.
+
+```ts
+import { defineWebMcpExecutionSuite } from "@oakzone/mcp-client-tests";
+import { target } from "./target";
+
+defineWebMcpExecutionSuite(target);
+```
+
+**It reports the shapes rather than requiring them, and that is the deliverable.** The draft carries
+both answers itself: its IDL types `RegisteredTool.inputSchema` as an `object`, its supporting
+concepts as that object stringified. The shipping implementation and the draft diverge again on the
+`executeTool` argument — filed on the draft's own tracker as `webmachinelearning/webmcp#287`, with
+#278 and #279, and reproduced first-hand in stock Chrome 151.0.7922.138 with no flags:
+`executeTool(tool, {…})` threw `UnknownError: Failed to parse input arguments` where
+`executeTool(tool, JSON.stringify({…}))` succeeded.
+
+So the advisories say *this browser returned `inputSchema` as X and accepted arguments as Y*, and the
+assertions cover only what both readings agree on: a tool publishes a schema that parses, and some
+published encoding is accepted. A page built against one reading and tested against a stub of the
+same reading passes its own suite and fails in front of every user — the exact class of defect no
+amount of unit testing reaches. Read whichever encoding you are handed
+(`typeof schema === "string" ? JSON.parse(schema) : schema`) and you survive either resolution.
+
+**It also checks the round trip, which is not a WebMCP property at all.** Every value a tool's result
+reports for a parameter must be a value that parameter accepts. A surface can print a filter as `on`,
+publish `{"type":"boolean"}` for it, and accept `"true"` in its handler — three spellings, each
+internally consistent, and a model that copies the printed value back earns a refusal for doing
+exactly what the payload invited. That one was found in a browser after surviving 49 unit tests,
+three adversarial review passes, and a design that explicitly called for the correct behaviour,
+because every test asserted the producer's output against a literal instead of feeding it back
+through the consumer. This suite feeds it back, with your own published schema as the consumer, and
+reports a refusal only where the schema is unambiguous — a `type`, an `enum`, a `const`, a bound, a
+pattern. A schema carrying `anyOf`, `oneOf` or `$ref` is not judged at all.
+
+**It calls your code, so you have to name what it may call**, in `webMcp.toolCalls`. That is a fact
+about the tool — "this one performs no side effect and these arguments are valid for it" — in the
+same way `consentFormId` is a fact about your consent screen. Each named tool is called **more than
+once per run**, because every published argument encoding is attempted whatever the first one does.
+Name only read-only tools, and expect them to be called on every conformance run. Declare none and
+nothing is executed: the run then records what it could not observe rather than passing on a surface
+it never touched.
 
 **Most of what it has to say is advisory**, because by the explainer's own account the declarative
 half is the less finished half — input-schema synthesis is marked TBD and the response mechanism is
