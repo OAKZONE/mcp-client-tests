@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import { advise, formatAdvisories, takeAdvisories } from "./advisory.js";
 import { findForm, browserOriginFor } from "./browser.js";
 import { consentControls } from "./flow.js";
+import { collectAttributeValues } from "./html.js";
 import {
   MCP_STATELESS_REVISION,
   parseBearerChallenge,
@@ -248,7 +249,7 @@ describe("findForm", () => {
 
 describe("consentControls", () => {
   it("defaults the checkbox name to `scope`", () => {
-    expect(consentControls({ consentFormId: "approve" })).toEqual({
+    expect(consentControls({ consentFormId: "approve" })).toMatchObject({
       consentFormId: "approve",
       consentScopeFieldName: "scope",
     });
@@ -259,7 +260,58 @@ describe("consentControls", () => {
     // reading `scope`; nothing in any specification names this control.
     expect(
       consentControls({ consentFormId: "approve", consentScopeFieldName: "selectedScopes" }),
-    ).toEqual({ consentFormId: "approve", consentScopeFieldName: "selectedScopes" });
+    ).toMatchObject({ consentFormId: "approve", consentScopeFieldName: "selectedScopes" });
+  });
+
+  it("defaults the stated-permission marker to `data-consent-scope`", () => {
+    expect(consentControls({ consentFormId: "approve" })).toMatchObject({
+      consentScopeMarkerAttribute: "data-consent-scope",
+    });
+  });
+
+  it("carries the deployment's own marker when it declares one", () => {
+    expect(
+      consentControls({ consentFormId: "approve", consentScopeMarkerAttribute: "data-permission" }),
+    ).toMatchObject({ consentScopeMarkerAttribute: "data-permission" });
+  });
+});
+
+describe("collectAttributeValues", () => {
+  it("reads a marker off whatever element the page chose to carry it", () => {
+    // Which tag states the permission is the page's business; the marker is the fact being read.
+    expect(
+      collectAttributeValues(
+        `<ul><li data-consent-scope="files:read">Read your files</li>` +
+          `<section data-consent-scope="files:write">Change them</section></ul>`,
+        "data-consent-scope",
+      ),
+    ).toEqual(["files:read", "files:write"]);
+  });
+
+  it("states one fact once, however many elements repeat it", () => {
+    expect(
+      collectAttributeValues(
+        `<h3 data-consent-scope="files:read">Files</h3><p data-consent-scope="files:read">Read</p>`,
+        "data-consent-scope",
+      ),
+    ).toEqual(["files:read"]);
+  });
+
+  it("ignores the attribute when it carries nothing", () => {
+    // A valueless marker names no permission, and reporting `""` as one presented would be worse
+    // than reporting none: it turns a page's typo into a scope the suite claims was on screen.
+    expect(collectAttributeValues(`<li data-consent-scope>Read</li>`, "data-consent-scope")).toEqual(
+      [],
+    );
+  });
+
+  it("finds nothing in a screen that offers controls instead", () => {
+    expect(
+      collectAttributeValues(
+        `<input type="checkbox" name="scope" value="files:read" checked>`,
+        "data-consent-scope",
+      ),
+    ).toEqual([]);
   });
 });
 

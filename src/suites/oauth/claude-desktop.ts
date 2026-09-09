@@ -484,7 +484,10 @@ describe.skipIf(!mcpTarget.authorization)(
             cite(
               VENDOR.ANTHROPIC_LAZY_AUTH,
               "Every scope the client requested must appear on the consent screen; the screen is " +
-                "the whole of what the holder agrees to.",
+                "the whole of what the holder agrees to. A screen that offers permissions as " +
+                "controls is read through `consentScopeFieldName`; one that states them is read " +
+                "through `consentScopeMarkerAttribute` — an empty list here means neither was " +
+                "found, not that the screen may present nothing.",
             ),
           ).toContain(value);
         }

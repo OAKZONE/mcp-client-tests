@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.9.1 — A consent screen that states its permissions is read, not reported as presenting none
+
+The Claude Desktop consent assertion — *every scope the client requested must appear on the consent
+screen* — read the screen through its checkboxes and nothing else. A deployment with a **single**
+grantable scope has nothing to put in a picker: the box would be pre-ticked and un-tickable, a
+control that decides nothing, so such a screen states each permission and its consequence in prose
+and asks Allow or Deny. The screen presents every requested permission, which is what the
+requirement is about, and the package reported it as presenting none.
+
+That was the package being wrong about a conformant server — the failure mode it exists to prevent —
+so this is a correction rather than a new capability.
+
+### Added — `consentScopeMarkerAttribute`
+
+A screen states a permission by marking the element that carries its text:
+
+```html
+<li data-consent-scope="files:read">Read your files. It can never delete one.</li>
+```
+
+`runAuthorizationLeg` now reports those in `offeredScopes` alongside any checkboxes, as
+`checked: true, disabled: true` — which is exactly what a browser does with a control it cannot
+untick: it submits nothing for it. The submission model and every assertion built on it keep their
+existing meaning, and a control still wins over a marker on the same value.
+
+The attribute is declared on the authorization capability and defaults to `data-consent-scope`,
+beside `consentFormId` and `consentScopeFieldName` — consent markup is the deployment's, not the
+protocol's, and this is the third fact the package has to be told rather than guess.
+
+`collectAttributeValues()` is new in the HTML scanner: it asks about an attribute rather than an
+element, because which tag carries a permission is the page's business.
+
+### Changed
+
+- The consent assertion's failure message now names both ways a screen can be read, so an empty list
+  reads as *neither shape was found* rather than *your screen presents nothing*.
+
+### Upgrading
+
+Nothing breaks. A deployment whose consent screen offers checkboxes needs no change. A deployment
+whose screen states permissions adds one attribute per permission and goes green.
+
 ## v0.9.0 — WebMCP past the registration: whether a visitor can reach it, whether a document lets go, and the two shapes every caller touches
 
 The WebMCP family until now asked one question: are the tools on your pages **declared** the way the

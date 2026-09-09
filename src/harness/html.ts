@@ -64,3 +64,33 @@ export function collectTags(
   }
   return found;
 }
+
+/**
+ * Every distinct value one attribute carries in a document, in source order, on any element.
+ *
+ * Unlike {@link collectTags}, this asks about the attribute rather than the element, because the
+ * thing being looked for is a *marker* — a fact a page states about an element whose tag is the
+ * page's own business. A consent screen may state a permission in an `<li>`, a `<section>`, or a
+ * `<p>`, and which one it picked says nothing about the deployment's conformance.
+ *
+ * Values are de-duplicated: a page that marks both a heading and its body with the same value has
+ * stated one fact twice, not two facts.
+ *
+ * @param html - The rendered document.
+ * @param attribute - The attribute name, lowercase.
+ * @returns Each distinct non-empty value, first occurrence first.
+ */
+export function collectAttributeValues(
+  html: string,
+  attribute: string,
+): readonly string[] {
+  const values = new Set<string>();
+  const pattern = /<[a-zA-Z][^>]*>/g;
+  let match = pattern.exec(html);
+  while (match !== null) {
+    const value = parseAttributes(match[0]).get(attribute);
+    if (value) values.add(value);
+    match = pattern.exec(html);
+  }
+  return [...values];
+}

@@ -27,6 +27,7 @@ import { expect } from "vitest";
 
 import { openBrowser, findForm, type Browser } from "./browser.js";
 import type { EdgeTarget, WireResponse } from "./edge-transport.js";
+import { collectAttributeValues } from "./html.js";
 import type { DocumentPublisher } from "./document-host.js";
 import {
   clientAuthenticationFor,
@@ -191,21 +192,50 @@ export function openOAuthSession(
 export const DEFAULT_CONSENT_SCOPE_FIELD = "scope";
 
 /**
+ * The attribute a consent screen marks a permission with when it STATES one rather than offers it.
+ *
+ * **Why a second way of reading the same screen.** A checkbox is how a screen presents a permission
+ * the holder may decline *individually*; it is not the only conformant way to present one. A
+ * deployment with a single grantable scope has nothing to offer a picker — the box would be
+ * pre-ticked and un-tickable, a control that changes nothing — so it states the permission and its
+ * consequence in prose, and the holder's real choice is the Allow/Deny the screen already asks for.
+ * That screen presents every requested permission, which is what the vendor requirement is about;
+ * reading only checkboxes would report it as presenting none.
+ *
+ * So a marked element means: *this permission is stated, and it is not selectable*. It projects as
+ * `checked: true, disabled: true`, which is exactly what a real browser does with a control it
+ * cannot untick — it submits nothing for it — so the submission model and every assertion built on
+ * it keep their existing meaning.
+ *
+ * It carries the `data-` prefix because it is a fact a page states about itself, and HTML reserves
+ * that prefix for exactly that.
+ */
+export const DEFAULT_CONSENT_SCOPE_MARKER = "data-consent-scope";
+
+/**
  * The consent-screen facts a browser leg needs, read off a target's authorization capability.
  *
  * Spread into a leg's options (`...consentControls(authorization)`) so a new consent-screen fact is
  * added in one place rather than at every call site that drives a browser.
  *
  * @param authorization - The target's authorization capability.
- * @returns The consent form's id and the name of its permission controls.
+ * @returns The consent form's id, the name of its permission controls, and the attribute it marks
+ *   a stated permission with.
  */
 export function consentControls(authorization: {
   readonly consentFormId: string;
   readonly consentScopeFieldName?: string;
-}): { consentFormId: string; consentScopeFieldName: string } {
+  readonly consentScopeMarkerAttribute?: string;
+}): {
+  consentFormId: string;
+  consentScopeFieldName: string;
+  consentScopeMarkerAttribute: string;
+} {
   return {
     consentFormId: authorization.consentFormId,
     consentScopeFieldName: authorization.consentScopeFieldName ?? DEFAULT_CONSENT_SCOPE_FIELD,
+    consentScopeMarkerAttribute:
+      authorization.consentScopeMarkerAttribute ?? DEFAULT_CONSENT_SCOPE_MARKER,
   };
 }
 
@@ -215,7 +245,13 @@ export interface AuthorizationLeg {
   readonly callbackUrl: string;
   /** The consent screen's response, so its headers and controls can be asserted on. */
   readonly consentPage: WireResponse;
-  /** Every scope the consent screen offered, and how it presented each. */
+  /**
+   * Every scope the consent screen presented, and how it presented each.
+   *
+   * A scope the screen *offers* carries the control's own state. A scope the screen merely *states*
+   * — marked with {@link DEFAULT_CONSENT_SCOPE_MARKER} rather than rendered as a control — reads as
+   * granted and not selectable: `checked: true, disabled: true`.
+   */
   readonly offeredScopes: readonly {
     readonly value: string;
     readonly checked: boolean;
@@ -233,6 +269,11 @@ export interface AuthorizationLegOptions {
   readonly consentFormId: string;
   /** The `name` the consent screen's permission checkboxes carry. Defaults to `scope`. */
   readonly consentScopeFieldName?: string;
+  /**
+   * The attribute marking a permission the screen states rather than offers. Defaults to
+   * `data-consent-scope`.
+   */
+  readonly consentScopeMarkerAttribute?: string;
   /** Extra permissions the holder ticks beyond what the client asked for. */
   readonly additionalScopes?: readonly string[];
   /** `allow` completes the authorization; `deny` refuses it. */
@@ -288,13 +329,24 @@ export async function runAuthorizationLeg(
   }
 
   const scopeField = options.consentScopeFieldName ?? DEFAULT_CONSENT_SCOPE_FIELD;
-  const offeredScopes = form.checkboxes
+  const offered = form.checkboxes
     .filter((control) => control.name === scopeField)
     .map((control) => ({
       value: control.value,
       checked: control.checked,
       disabled: control.disabled,
     }));
+
+  // A screen may STATE a permission instead of offering it (see DEFAULT_CONSENT_SCOPE_MARKER). Those
+  // join the same list, as granted-and-not-selectable, so a caller asks one question — "what did the
+  // screen present?" — rather than having to know which shape this deployment chose. A control wins
+  // over a marker on the same value: the control is the richer fact, and it is what the browser acts
+  // on.
+  const marker = options.consentScopeMarkerAttribute ?? DEFAULT_CONSENT_SCOPE_MARKER;
+  const stated = collectAttributeValues(html, marker)
+    .filter((value) => !offered.some((control) => control.value === value))
+    .map((value) => ({ value, checked: true, disabled: true }));
+  const offeredScopes = [...offered, ...stated];
 
   // A browser submits a checkbox only when it is checked AND enabled; a disabled control sends
   // nothing at all. Modelling that exactly is what makes "the server re-adds what the client asked

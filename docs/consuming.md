@@ -68,6 +68,7 @@ export const target: McpTestTarget = {
   authorization: {
     consentFormId: "consent-approve",
     consentScopeFieldName: "scope", // optional; the name your permission checkboxes carry
+    consentScopeMarkerAttribute: "data-consent-scope", // optional; for a screen that states them
     accessTokenSeconds: 5, // optional; unlocks the expiry → refresh → retry path
     async createAccountHolder(suiteId) { /* … */ },
     async clearAccountHolders(suiteId) { /* … */ },
@@ -92,6 +93,14 @@ submits the checkbox `name` your page declares and nothing else. If your decisio
 `selectedScopes`, set `consentScopeFieldName` to match, or every consent submits an empty capability
 set. Nothing in any specification names this control — your server is not wrong, the package just
 cannot guess.
+
+**If your screen states permissions instead of offering them, mark them.** A checkbox presents a
+permission the holder may decline on its own. A deployment with one grantable scope has nothing to
+put in a picker — the box would be pre-ticked and un-tickable, a control that decides nothing — so
+it states the permission and its consequence, and Allow/Deny is the real choice. Put
+`data-consent-scope="<the scope>"` on the element carrying each permission's text, and the suites
+read what your screen presented. Both shapes are conformant; a screen the package can read neither
+way is reported as presenting no permissions at all.
 
 **Do not disconnect your database client between suites.** They share one worker, so tearing the
 pool down when one finishes takes it out from under the next; worse, an idle client erroring on a

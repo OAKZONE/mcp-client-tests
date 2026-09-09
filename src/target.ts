@@ -178,6 +178,21 @@ export interface AuthorizationCapability {
   readonly consentScopeFieldName?: string;
 
   /**
+   * The attribute the consent screen marks a permission with when it STATES one rather than
+   * offering it as a control.
+   *
+   * A checkbox presents a permission the holder may decline on its own. A deployment with a single
+   * grantable scope has nothing to put in a picker — the box would be pre-ticked and un-tickable —
+   * so it states the permission and its consequence, and Allow/Deny is the holder's real choice.
+   * Marking each stated permission lets the suites read what the screen presented without the
+   * deployment rendering a control that decides nothing.
+   *
+   * Mark the element that carries the permission's text: `<li data-consent-scope="files:read">`.
+   * Defaults to `data-consent-scope`; a deployment that offers checkboxes need not mark anything.
+   */
+  readonly consentScopeMarkerAttribute?: string;
+
+  /**
    * The access-token lifetime the deployment was started with, in seconds.
    *
    * Declaring it unlocks the expiry path — "the token expires, the client refreshes, the retry
