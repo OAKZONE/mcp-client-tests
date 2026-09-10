@@ -394,6 +394,38 @@ are unique per document, and that **every page you declared in `toolPages` regis
 That last one is assertable precisely because you declared the page: registering nothing contradicts
 your own claim, and both readings of that contradiction are real findings.
 
+**It waits for your page to register, rather than reading it at `load`.** This matters more than it
+sounds. `registerTool()` is a script call, and the imperative API exists to hand a *live
+application's* own functions to an agent — so a real page registers from a framework lifecycle hook,
+a React effect or `onMounted` or `onMount`, which fires after hydration, which is after `load`. A
+read taken at `load` is not an early read; it is a read taken before the normal case can have
+happened at all, and it reports every such page as registering nothing. Measured on a Next.js 16
+production build in stock Chrome 152, four pages registered 220–350 ms after `load` and none of them
+at `load`.
+
+So each navigation waits for a registration made by **that document** — it listens for `toolchange`
+on the new document's own `ModelContext`, with a bounded re-read of `getTools()` behind it — and
+returns the moment one lands. A page that registers inline pays nothing; only a page that genuinely
+registers nothing waits out the deadline, once.
+
+**The deadline is 5000 ms, it is this package's number, and nothing published sets one.** Neither
+the draft nor Chrome states when a page must have registered by, so a slow page is not violating
+anything and the number never appears in a citation — only in the message, because *registered
+nothing within 5000 ms of `load`* is something you can act on. Raise it per suite or for a whole run:
+
+```ts
+defineWebMcpImperativeSuite(target, { registrationTimeoutMs: 15_000 });
+```
+
+```bash
+MCP_TESTS_WEBMCP_REGISTRATION_MS=15000 npx vitest run mcp-tests/
+```
+
+**A timeout is a named failure, never a skip and never an empty pass.** The run also reports, as an
+advisory, when your pages actually registered — and names any that landed past half the deadline,
+because a CI runner is routinely twice as slow as the machine you measured on and that page is the
+one that goes intermittently red later.
+
 **It also walks your pages in a single tab**, which is the only arrangement where a registration that
 outlived its own document can be seen at all. There is no `unregisterTool`: a registration is taken
 back by aborting the `AbortSignal` you passed to `registerTool`, which is what a document going away
@@ -427,6 +459,85 @@ silent skip.
 Under the hood it fronts your deployment with an HTTPS listener holding a certificate for your
 canonical host and points Chrome at it with `--host-resolver-rules`, so the page loads on the origin
 production serves — absolute URLs and all — and gets the secure context WebMCP requires.
+
+### Running the browser suites in CI
+
+Both browser suites **hard-fail** when they cannot find `playwright-core`, a Chrome, or the API.
+That is deliberate — a conformance run that quietly tested nothing is the worst outcome available —
+but it does mean registering them puts a browser on a publish-gating job's critical path. Here is
+what that actually costs, verified rather than reasoned about on **2026-09-10**.
+
+**On GitHub's `ubuntu-latest`, you install nothing.** The label currently resolves to Ubuntu 24.04
+x64, whose image ships **Google Chrome 152.0.7977.64** at `/usr/bin/google-chrome` (with Chromium
+152.0.7977.0 and ChromeDriver alongside). The suite launches Playwright's `chrome` channel when
+`MCP_TESTS_CHROME_PATH` is unset, and on Linux that channel resolves to `/opt/google/chrome/chrome`,
+which is where the Chrome `.deb` puts it. The flag the suite passes exists from Chrome 146.0.7672.0,
+so 152 is not marginal — it is six milestones clear.
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-node@v4
+  with: { node-version: 22, cache: npm }
+- run: npm ci
+- run: node -e "require.resolve('@oakzone/mcp-client-tests/package.json')"
+- run: npm run build
+- run: npx vitest run --no-file-parallelism mcp-tests/
+```
+
+**Where a Chrome is not already there** — a container image, a self-hosted runner, a pinned older
+image — one step installs one:
+
+```yaml
+- run: npx playwright-core install --with-deps chrome
+```
+
+**Mind the spelling.** It is `playwright-core`, the package this suite already needs. The familiar
+`npx playwright install …` would pull a *second*, different package off the registry at whatever
+version `npx` resolves. `--with-deps` installs the system libraries Chrome needs and wants root or
+`sudo`, which a GitHub-hosted runner gives it. In a container running as root, Chrome additionally
+refuses to start without `--no-sandbox`; pass it through `MCP_TESTS_CHROME_ARGS` **alongside** the
+feature switch, since that variable replaces the default rather than adding to it:
+
+```yaml
+- run: npx vitest run --no-file-parallelism mcp-tests/
+  env:
+    MCP_TESTS_CHROME_ARGS: "--enable-features=WebMCPTesting,DevToolsWebMCPSupport --no-sandbox"
+```
+
+**Is Playwright's bundled Chromium a valid substitute? Yes — with a version trap.** This is the
+first thing most people try, so it is worth being exact. Launched with the same switch, on
+2026-09-10:
+
+| Binary | Version | `document.modelContext` | `navigator.modelContext` |
+|:---|:---|:---|:---|
+| Google Chrome (system) | 152.0.7977.83 | yes | **no — removed** |
+| Playwright bundled Chromium | 151.0.7922.34 | yes | yes (same object) |
+| Playwright headless shell | 151.0.7922.34 | yes | yes (same object) |
+| Playwright bundled Chromium | 149.0.7827.55 | **no** | yes |
+
+So the feature is genuinely in the open-source build, and even the stripped headless shell has it —
+`playwright-core` 1.63 downloads Chrome for Testing 153.0.8010.12 as its "chromium", which is
+Chrome's own build line. The trap is that **the version comes from your Playwright version, not from
+your choice**: on a Playwright old enough to pin Chromium 149 there is no `document.modelContext` at
+all, so a page written to the current spelling registers nothing and the run reports your page. The
+system Chrome is the better default because it is both current and the thing your users actually
+run. Reach for the bundled one only where no system Chrome exists, and pin a Playwright new enough
+to matter:
+
+```yaml
+- run: npx playwright-core install --with-deps chromium
+```
+
+```ts
+defineWebMcpImperativeSuite(target, {
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH,
+});
+```
+
+**Budget the wall clock.** Each declared page is loaded once per suite, and each load waits only
+until that page registers — a few hundred milliseconds for a page that registers on hydration. The
+cost that is not small is a page registering **nothing**: that one waits the full deadline, so a
+broken run is slower than a healthy one, not faster.
 
 ### Calling your tools — `defineWebMcpExecutionSuite`
 

@@ -1,5 +1,118 @@
 # Changelog
 
+## v0.10.0 — The browser suites wait for your page to register, instead of reading it before it can have
+
+**If you were told your pages register no WebMCP tools, you were told something false.** The browser
+suites read `getTools()` in the statement after the navigation resolved, with no wait and no retry.
+`registerTool()` is a script call, and the imperative API exists to hand a **live application's** own
+functions to an agent — so a real page registers from a framework lifecycle hook, a React effect or
+`onMounted` or `onMount`, which fires after hydration, which is after `load`. The read landed in that
+gap every time.
+
+That is not an edge case; it is the normal case, and the margin was not close. Measured on a Next.js
+16 production build in stock Chrome 152.0.7977.83, four pages registering three tools each: `load`
+fired 87–132 ms after navigation, **not one tool was live at `load`**, and every page had all three
+registered 345–478 ms in — 220–350 ms after `load`. Deterministic, not flaky.
+
+So two suites reported this, of pages doing nothing wrong:
+
+> These pages are declared as publishing WebMCP tools and registered none by load: … Either the page
+> does not belong in `toolPages`, or its `registerTool` call never landed — the documented silent
+> failure
+
+> `<tool>` was not registered when the call was made (that page registered nothing)
+
+Both sent the reader to debug a page that was correct. That is the one output a conformance package
+must never produce, and it is the same fault v0.9.1 corrected on the consent screen: the package
+being wrong about a conformant server.
+
+**The shape that hid it** is a fixture that registers inline in the document. That one is green
+whenever the read happens, so a suite tested only against fixtures never sees the gap. The rig this
+release was verified against registers from a dynamically imported module after `load`, on purpose.
+
+### Changed — `read`, `readSequence` and `execute` wait for a registration
+
+All three now wait, rather than sampling. Each navigation listens for `toolchange` on the **new
+document's own** `ModelContext` — installed before any page script runs, so an event counted was
+raised by that document and by nothing before it — with a bounded re-read of `getTools()` behind it.
+The wait ends the moment a registration lands, so a page that registers inline still costs
+milliseconds. It is not a sleep: nothing pays for the slowest page.
+
+**The lifetime check is unchanged and uninverted.** Waiting "until the list is non-empty" would have
+been satisfied by exactly the leak that check exists to catch — a registration outliving its
+document is live from the new page's first moment — and would then have read the second page before
+it had registered anything, turning the assertion into a silent pass. The wait therefore keys on the
+new document's own registration: the `toolchange` listener cannot see an earlier document's
+registration at all, and the poll compares against the names that were already live. Verified against
+a page that arrives holding a tool it never registered — the run waits past it, reads that page's own
+two tools **and** the leaked one, and reports the leak.
+
+### Changed — "registered none by load" is now "registered nothing within 5000 ms of `load`"
+
+A bounded deadline changes what an empty reading means, so the message says what it waited to and
+lists the three readings in the order worth checking. A page that genuinely registers nothing still
+**fails** — a timeout is a named failure, never a skip and never an empty pass.
+
+### Added — `registrationTimeoutMs`, and the honest grade on the number behind it
+
+```ts
+defineWebMcpImperativeSuite(target, { registrationTimeoutMs: 15_000 });
+```
+
+Also `MCP_TESTS_WEBMCP_REGISTRATION_MS` for a whole run. The default is 5000 ms.
+
+**Nothing published states when a page must have registered by** — not the draft, not Chrome. So the
+deadline is this package's own number, and `WEBMCP.REGISTRATION_IS_UNTIMED` is graded MODERATE, which
+makes it structurally unable to fail anyone: `cite()` refuses it. It appears in messages and in an
+advisory, never in a citation. A page slower than the deadline is not violating anything.
+
+### Added — an advisory saying when your pages actually registered
+
+Reported because the run has to measure it anyway, and because it separates a page that registers on
+hydration from one that waits on a network call. Any page landing past **half** the deadline is
+named: a CI runner is routinely twice as slow as the machine you measured on, and that page is the
+one that goes intermittently red later.
+
+### Added — what a CI runner actually needs, verified rather than reasoned about
+
+The browser suites hard-fail rather than skip when they cannot find `playwright-core`, a Chrome, or
+the API. That is deliberate, and it means registering them puts a browser on a publish-gating job's
+critical path. `docs/consuming.md` now has **Running the browser suites in CI**, and the failure
+messages name the install line themselves. Verified 2026-09-10:
+
+- **GitHub's `ubuntu-latest` needs no install step.** It resolves to Ubuntu 24.04 x64, whose image
+  ships **Google Chrome 152.0.7977.64** at `/usr/bin/google-chrome`. The suite's `chrome` channel
+  resolves to `/opt/google/chrome/chrome` on Linux, which is where the `.deb` puts it. The flag
+  exists from Chrome 146.0.7672.0, so 152 is six milestones clear rather than marginal.
+- **Where there is no Chrome:** `npx playwright-core install --with-deps chrome`. Note the spelling —
+  `playwright-core` is the package you already have; `npx playwright …` fetches a second, different
+  one.
+- **Playwright's bundled Chromium is a valid substitute, with a version trap.** Launched with the
+  same switch: Chromium 151.0.7922.34 exposes `document.modelContext`, and so does its *headless
+  shell*; `playwright-core` 1.63 downloads Chrome for Testing 153.0.8010.12 as its "chromium", which
+  is Chrome's own build line. But Chromium 149.0.7827.55 has **no** `document.modelContext` at all —
+  and that version comes from your Playwright version, not from your choice.
+
+### Corrected — `navigator.modelContext` is gone from Chrome 152, not merely deprecated
+
+Recorded here because the package said otherwise in a docstring. Observed 2026-09-10 under the
+testing switch: **Chrome 152.0.7977.83 has no `navigator.modelContext` and no
+`navigator.modelContextTesting`**; Chromium 151 has both, as one object; Chromium 149 has only the
+`navigator` spelling. No assertion changes — the suite already probes each surface and reports which
+answered, which is why a browser moving the reader shows up as a change rather than as your pages
+registering nothing.
+
+### Upgrading
+
+**Your run may turn red where it was green, and the finding is real.** Every assertion downstream of
+a registration was previously inspecting an empty list on any page that registers after hydration —
+tool `name` and `description`, name uniqueness, the per-document lifetime walk, the input schema, the
+`executeTool` encodings, the round trip. All of them passed on nothing. They now see your tools and
+judge them, and anything they report was true before this release too.
+
+**Nothing to configure.** A page that registers inline behaves exactly as it did. If a page of yours
+is slower than 5000 ms, the failure message says so and names the option to raise.
+
 ## v0.9.1 — A consent screen that states its permissions is read, not reported as presenting none
 
 The Claude Desktop consent assertion — *every scope the client requested must appear on the consent

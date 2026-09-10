@@ -71,6 +71,12 @@ import {
 } from "./webmcp-execution.js";
 import { leakedRegistrations } from "./webmcp-lifetime.js";
 import {
+  WEBMCP_REGISTRATION_DEADLINE_MS,
+  pagesNearDeadline,
+  registrationDelayFinding,
+  resolveRegistrationDeadlineMs,
+} from "./webmcp-registration.js";
+import {
   conditionalDeliveryProblem,
   decodeOriginTrialToken,
   originCanHoldTrialToken,
@@ -1599,6 +1605,100 @@ describe("acceptedEncodings and executionProblem", () => {
 
   it("says nothing when no attempt was made, which is not the same as a failure", () => {
     expect(executionProblem([])).toBeUndefined();
+  });
+});
+
+describe("resolveRegistrationDeadlineMs", () => {
+  it("prefers what the consumer configured over the environment and the default", () => {
+    expect(resolveRegistrationDeadlineMs(1_500, "9000")).toBe(1_500);
+  });
+
+  it("falls back to the environment, then to the default", () => {
+    expect(resolveRegistrationDeadlineMs(undefined, "9000")).toBe(9_000);
+    expect(resolveRegistrationDeadlineMs(undefined, undefined)).toBe(
+      WEBMCP_REGISTRATION_DEADLINE_MS,
+    );
+  });
+
+  it("ignores a value that would turn the wait back into a single sample", () => {
+    // The failure this guards is silent rather than loud: an unset or fat-fingered variable that
+    // resolved to 0 would restore exactly the sample-at-load behaviour the wait exists to remove,
+    // and every page registering after hydration would go back to reading as registering nothing.
+    for (const unusable of ["", "0", "-1", "soon", "NaN"]) {
+      expect(resolveRegistrationDeadlineMs(undefined, unusable)).toBe(
+        WEBMCP_REGISTRATION_DEADLINE_MS,
+      );
+    }
+    expect(resolveRegistrationDeadlineMs(0, undefined)).toBe(WEBMCP_REGISTRATION_DEADLINE_MS);
+    expect(resolveRegistrationDeadlineMs(Number.NaN, undefined)).toBe(
+      WEBMCP_REGISTRATION_DEADLINE_MS,
+    );
+  });
+});
+
+describe("registrationDelayFinding", () => {
+  it("says nothing when no page registered anything for there to be a delay of", () => {
+    expect(
+      registrationDelayFinding([
+        { path: "/a", registrationObserved: false, registrationDelayMs: 5_000 },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("reports the range across the pages that did register, and names the slowest", () => {
+    const finding = registrationDelayFinding([
+      { path: "/fast", registrationObserved: true, registrationDelayMs: 40 },
+      { path: "/slow", registrationObserved: true, registrationDelayMs: 480 },
+      { path: "/never", registrationObserved: false, registrationDelayMs: 5_000 },
+    ]);
+
+    expect(finding).toContain("2 of 3");
+    expect(finding).toContain("40–480 ms");
+    expect(finding).toContain("/slow");
+  });
+
+  it("reports a single figure rather than a range of one value to itself", () => {
+    const finding = registrationDelayFinding([
+      { path: "/only", registrationObserved: true, registrationDelayMs: 120 },
+    ]);
+
+    expect(finding).toContain("120 ms");
+    expect(finding).not.toContain("–");
+  });
+});
+
+describe("pagesNearDeadline", () => {
+  it("names nothing when every page registered comfortably inside the deadline", () => {
+    expect(
+      pagesNearDeadline(
+        [{ path: "/a", registrationObserved: true, registrationDelayMs: 300 }],
+        5_000,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names the pages past half the deadline, slowest first", () => {
+    // Half, because a CI runner is routinely twice as slow as the machine a delay was measured on:
+    // a page landing at 60% here is a page that fails there.
+    expect(
+      pagesNearDeadline(
+        [
+          { path: "/comfortable", registrationObserved: true, registrationDelayMs: 400 },
+          { path: "/close", registrationObserved: true, registrationDelayMs: 3_000 },
+          { path: "/closer", registrationObserved: true, registrationDelayMs: 4_200 },
+        ],
+        5_000,
+      ),
+    ).toEqual(["/closer (4200 ms)", "/close (3000 ms)"]);
+  });
+
+  it("never names a page that timed out, which is a failure rather than a close call", () => {
+    expect(
+      pagesNearDeadline(
+        [{ path: "/never", registrationObserved: false, registrationDelayMs: 5_000 }],
+        5_000,
+      ),
+    ).toEqual([]);
   });
 });
 

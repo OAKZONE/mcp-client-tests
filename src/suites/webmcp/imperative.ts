@@ -30,9 +30,13 @@ import {
   type WebMcpBrowserSession,
 } from "../../harness/webmcp-browser.js";
 import { leakedRegistrations } from "../../harness/webmcp-lifetime.js";
+import {
+  REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE,
+  resolveRegistrationDeadlineMs,
+} from "../../harness/webmcp-registration.js";
 import type { McpTestTarget } from "../../target.js";
 
-import { assertWebMcpApiPresent } from "./browser-support.js";
+import { adviseRegistrationTiming, assertWebMcpApiPresent } from "./browser-support.js";
 
 const SCOPE = "WebMCP registered tools (browser)";
 
@@ -58,6 +62,10 @@ export function defineWebMcpImperativeSuite(
     let walk: readonly RegisteredToolReading[] = [];
 
     const capability = mcpTarget.webMcp ?? { toolPages: [] };
+    const deadlineMs = resolveRegistrationDeadlineMs(
+      browserOptions.registrationTimeoutMs,
+      process.env[REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE],
+    );
 
     beforeAll(async () => {
       deployment = readRunningDeployment(mcpTarget.id);
@@ -116,12 +124,22 @@ export function defineWebMcpImperativeSuite(
         empty,
         cite(
           WEBMCP.DOCUMENT_MODEL_CONTEXT,
-          "These pages are declared as publishing WebMCP tools and registered none by load: " +
-            `${empty.join(", ")}. Either the page does not belong in \`toolPages\`, or its ` +
-            "`registerTool` call never landed — the documented silent failure, and the one the " +
-            "`navigator` → `document` migration causes. A page that registers only after user " +
-            "interaction is the third reading; move it out of `toolPages` if so, because nothing " +
-            "here can drive it.",
+          "These pages are declared as publishing WebMCP tools and registered nothing within " +
+            `${deadlineMs} ms of \`load\`: ${empty.join(", ")}.\n` +
+            "  The run does not sample at `load` — it waits, because a registration made from a " +
+            "framework lifecycle hook lands after hydration and a page that registers inline is " +
+            "the exception rather than the rule. So this is a page that had the whole window and " +
+            "used none of it.\n" +
+            "  Three readings, in the order worth checking:\n" +
+            "    1. The `registerTool` call never landed — the documented silent failure, and the " +
+            "one the `navigator` → `document` migration causes. Confirm `document.modelContext` " +
+            "is the object your page reaches for.\n" +
+            "    2. The page registers, but later than the deadline — because it waits on a " +
+            "fetch, or because this machine is slower than the one you measured on. Raise " +
+            "`registrationTimeoutMs` (or `MCP_TESTS_WEBMCP_REGISTRATION_MS`); the number is this " +
+            "package's own and nothing published sets it.\n" +
+            "    3. The page registers only after the user does something, or does not belong in " +
+            "`toolPages` at all. Move it out if so — nothing here can drive it.",
         ),
       ).toEqual([]);
     });
@@ -210,6 +228,7 @@ export function defineWebMcpImperativeSuite(
     });
 
     it("records what the registered surface offers and does not say", () => {
+      adviseRegistrationTiming(SCOPE, readings, deadlineMs);
       collectAdvisories(readings, walk, capability.toolPages.length);
       expect(readings.length, "The `webMcp` capability declared no pages to load.").toBeGreaterThan(
         0,

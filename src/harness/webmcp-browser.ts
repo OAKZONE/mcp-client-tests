@@ -45,6 +45,11 @@ import type { AddressInfo } from "node:net";
 
 import { createLoopbackTlsMaterial } from "./tls-certificate.js";
 import type { ExecutionAttempt } from "./webmcp-execution.js";
+import {
+  REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE,
+  WEBMCP_REGISTRATION_POLL_MS,
+  resolveRegistrationDeadlineMs,
+} from "./webmcp-registration.js";
 
 /** How to find a browser, when the defaults do not. */
 export interface WebMcpBrowserOptions {
@@ -65,6 +70,16 @@ export interface WebMcpBrowserOptions {
   readonly launchArgs?: readonly string[];
   /** Run headless. Defaults to true; set false to watch the page while diagnosing. */
   readonly headless?: boolean;
+  /**
+   * How long to wait, after `load`, for a page to register its tools. Defaults to
+   * `MCP_TESTS_WEBMCP_REGISTRATION_MS` and then to {@link WEBMCP_REGISTRATION_DEADLINE_MS}.
+   *
+   * **It is this package's number, not a requirement** — nothing published says when a page must
+   * have registered by. Raise it for a page whose registration waits on a network call, or for a CI
+   * runner slower than the machine the default was chosen against. A correct page pays none of it:
+   * the wait ends the moment a registration is seen.
+   */
+  readonly registrationTimeoutMs?: number;
 }
 
 /**
@@ -167,11 +182,14 @@ export interface RegisteredToolReading {
   /**
    * Whether the browser exposed the WebMCP API at all.
    *
-   * **Not which spelling the page used**, which is unobservable from here: `navigator.modelContext`
-   * is an alias Chrome still keeps for `document.modelContext`, so both names reference one object
-   * and both are present on any browser that has the API — whatever the page wrote. The page's
-   * choice of spelling lives only in its source text, which is why the deprecation advisory belongs
-   * to the declarative suite and not to this one.
+   * **Not which spelling the page used**, which is unobservable from here. Where both names exist
+   * they reference one object, so neither reveals what the page wrote; and where only one exists,
+   * what a reading shows is the browser's vintage rather than the page's source. Observed under the
+   * testing switch on 2026-09-10: Chrome 152.0.7977.83 has `document.modelContext` and **no**
+   * `navigator.modelContext` at all — removed, not merely deprecated — while Chromium
+   * 151.0.7922.34 has both as one object and Chromium 149.0.7827.55 has only the `navigator`
+   * spelling. The page's own choice lives only in its source text, which is why the deprecation
+   * advisory belongs to the declarative suite and not to this one.
    */
   readonly apiPresent: boolean;
   /**
@@ -183,6 +201,21 @@ export interface RegisteredToolReading {
    */
   readonly toolSurface: string;
   readonly tools: readonly RegisteredWebMcpTool[];
+  /**
+   * Whether a registration made by **this** document was seen before the deadline.
+   *
+   * Not "the list was non-empty", which the tools an earlier document failed to release would also
+   * satisfy — see `webmcp-registration.ts` for why that distinction decides whether the lifetime
+   * assertion means anything.
+   */
+  readonly registrationObserved: boolean;
+  /**
+   * Milliseconds after `load` at which the reading was taken.
+   *
+   * The page's observed registration delay when {@link registrationObserved} is true, and the full
+   * wait when it is false — which is the number the failure message quotes.
+   */
+  readonly registrationDelayMs: number;
 }
 
 /** What one attempt to call a registered tool through the browser produced. */
@@ -200,6 +233,10 @@ export interface ToolExecutionReading {
   readonly executorPresent: boolean;
   /** One attempt per published argument encoding, in the order they were tried. */
   readonly attempts: readonly ExecutionAttempt[];
+  /** Whether the page had registered anything of its own before the call was attempted. */
+  readonly registrationObserved: boolean;
+  /** Milliseconds after `load` that the run waited before calling. */
+  readonly registrationDelayMs: number;
 }
 
 /** A launched browser, and the pages read through it. */
@@ -267,8 +304,62 @@ const SURFACE_CANDIDATES = `[
     ["navigator.modelContext.getTools", navigator.modelContext, "getTools"],
   ]`;
 
-/** The script evaluated in the page: the same question an attached agent asks. */
-const READ_TOOLS = `(async () => {
+/**
+ * The name the observer below parks on `window`, read back by the wait script.
+ *
+ * Namespaced and improbable on purpose: it is set in the page's own main world, where the page's
+ * globals live, and a collision would make the run's own bookkeeping into a finding about somebody
+ * else's code.
+ */
+const OBSERVER_GLOBAL = "__mcpClientTestsWebMcpRegistration";
+
+/**
+ * Installed before any of the page's own scripts run, in every document the tab loads.
+ *
+ * **This is what makes "did *this* document register?" answerable.** `toolchange` fires on the
+ * `ModelContext` of the document that is registering, and this listener is attached to the new
+ * document's own object before that document has run a line of its own code — so an event counted
+ * here was raised by this document and by nothing that came before it. A registration that outlived
+ * an earlier document raises nothing here, which is precisely the property the lifetime assertion
+ * depends on.
+ *
+ * **It only listens.** It never assigns `ontoolchange`, which would silently replace a handler the
+ * page installed, and it never wraps `registerTool`, which would put this package's code on the path
+ * of the call it is trying to observe. A harness artefact reported as a consumer finding is the one
+ * thing this package must never produce, so the observation stays beside the page rather than inside
+ * it — and the poll in {@link awaitRegistrationScript} covers a browser whose event never arrives.
+ */
+const REGISTRATION_OBSERVER = `(() => {
+  const state = { changes: 0, attached: false };
+  window[${JSON.stringify(OBSERVER_GLOBAL)}] = state;
+
+  const attach = () => {
+    if (state.attached) return;
+    const host = document.modelContext;
+    if (!host || typeof host.addEventListener !== "function") return;
+    try {
+      host.addEventListener("toolchange", () => { state.changes += 1; });
+      state.attached = true;
+    } catch (error) {
+      // Listening is the fast path and never the only one. A surface that refuses a listener leaves
+      // the bounded poll to notice the registration; it must not take the run down with it.
+    }
+  };
+
+  attach();
+  // The object is normally there from the first moment of the document. These cover a browser where
+  // it is not, and cost nothing where it is: \`attach\` is idempotent.
+  document.addEventListener("readystatechange", attach);
+  document.addEventListener("DOMContentLoaded", attach);
+})()`;
+
+/**
+ * Reading the tool list, as a source fragment both scripts below share.
+ *
+ * Defines `shape` and `readOnce` against {@link SURFACE_CANDIDATES}, so a wait and the reading it
+ * ends can never disagree about where the surface is or what a tool looks like.
+ */
+const READ_ONCE = `
   const shape = (tool) => ({
     name: tool.name,
     description: tool.description,
@@ -276,21 +367,89 @@ const READ_TOOLS = `(async () => {
     annotations: tool.annotations,
   });
   const candidates = ${SURFACE_CANDIDATES};
-  const apiPresent = candidates.some(([, host]) => Boolean(host));
-  for (const [label, host, method] of candidates) {
-    if (!host || typeof host[method] !== "function") continue;
-    try {
-      const registered = await host[method]();
-      if (!Array.isArray(registered)) continue;
-      return { apiPresent, toolSurface: label, tools: registered.map(shape) };
-    } catch (error) {
-      // A surface that exists and throws is not the one to read from; try the next rather than
-      // failing the page, and report "none" if every one of them refuses.
-      continue;
+  const readOnce = async () => {
+    const apiPresent = candidates.some(([, host]) => Boolean(host));
+    for (const [label, host, method] of candidates) {
+      if (!host || typeof host[method] !== "function") continue;
+      try {
+        const registered = await host[method]();
+        if (!Array.isArray(registered)) continue;
+        return { apiPresent, toolSurface: label, tools: registered.map(shape) };
+      } catch (error) {
+        // A surface that exists and throws is not the one to read from; try the next rather than
+        // failing the page, and report "none" if every one of them refuses.
+        continue;
+      }
     }
+    return { apiPresent, toolSurface: "none", tools: [] };
+  };`;
+
+/**
+ * Wait for this document to register something, then read what is live.
+ *
+ * **Why a wait and not a sample.** `registerTool()` is a script call, and the application this API
+ * exists for registers from a framework lifecycle hook — after hydration, therefore after `load`.
+ * Reading at `load` reports every such page as registering nothing.
+ *
+ * **Why not a fixed sleep.** A sleep makes every page pay for the slowest one, on every run. This
+ * returns the moment a registration is seen, so a correct page costs the poll interval and a page
+ * that genuinely registers nothing costs the deadline once.
+ *
+ * **What counts as "this document registered".** In order: a `toolchange` raised on this document's
+ * own `ModelContext` (the observer above, and the only signal that is exact); otherwise a tool live
+ * under a name that was not already live when the document opened, or more tools live than were.
+ * The baseline is what the previous navigation in this tab left behind — empty for a fresh tab — so
+ * a registration that outlived an earlier document can never end this wait on its own. That is what
+ * keeps the lifetime assertion from inverting into a pass: a naive "wait until the list is
+ * non-empty" would be satisfied by the leak it exists to detect, and would then read the new page
+ * before it had registered anything.
+ *
+ * A browser with no WebMCP object returns at once rather than waiting out the deadline per page —
+ * the suites name that case themselves, and it is not a page's fault.
+ *
+ * @param baseline - Tool names already live when this document opened.
+ * @param deadlineMs - How long to wait after `load` before giving up and reading what is there.
+ * @param pollMs - How often to re-read while waiting.
+ * @returns The script source.
+ */
+function awaitRegistrationScript(
+  baseline: readonly string[],
+  deadlineMs: number,
+  pollMs: number,
+): string {
+  // Embedded as a JSON string and parsed in the page, so no tool name can terminate the literal or
+  // change the meaning of the script around it.
+  const settings = JSON.stringify(JSON.stringify({ baseline, deadlineMs, pollMs }));
+  return `(async () => {
+  const settings = JSON.parse(${settings});
+  const baseline = new Set(settings.baseline);
+  const observer = window[${JSON.stringify(OBSERVER_GLOBAL)}];
+  const started = Date.now();
+${READ_ONCE}
+
+  const registeredHere = (tools) => {
+    if (tools.length === 0) return false;
+    if (observer && observer.changes > 0) return true;
+    if (tools.some((tool) => !baseline.has(tool && tool.name))) return true;
+    return tools.length > baseline.size;
+  };
+
+  for (;;) {
+    const reading = await readOnce();
+    const waited = Date.now() - started;
+    if (!reading.apiPresent) {
+      return { ...reading, registrationObserved: false, registrationDelayMs: waited };
+    }
+    if (registeredHere(reading.tools)) {
+      return { ...reading, registrationObserved: true, registrationDelayMs: waited };
+    }
+    if (waited >= settings.deadlineMs) {
+      return { ...reading, registrationObserved: false, registrationDelayMs: waited };
+    }
+    await new Promise((resolve) => setTimeout(resolve, settings.pollMs));
   }
-  return { apiPresent, toolSurface: "none", tools: [] };
 })()`;
+}
 
 /**
  * The script that calls one tool, once per published argument encoding.
@@ -409,6 +568,9 @@ async function loadChromium(): Promise<{
         "Chrome already on the machine (or `MCP_TESTS_CHROME_PATH`).\n" +
         "    2. Register only `defineWebMcpDeclarativeSuite(target)`, which reads the served HTML " +
         "and needs no browser.\n" +
+        "  In CI the browser is the other half of the first one: GitHub's `ubuntu-latest` already " +
+        "ships Google Chrome, and anywhere else `npx playwright-core install --with-deps chrome` " +
+        "installs it.\n" +
         "  This is a hard stop rather than a skip: a conformance run that quietly tested nothing " +
         "is worse than one that failed.",
     );
@@ -422,6 +584,7 @@ interface PlaywrightBrowser {
 }
 interface PlaywrightContext {
   newPage(): Promise<PlaywrightPage>;
+  addInitScript(script: { content: string }): Promise<void>;
 }
 interface PlaywrightPage {
   goto(url: string, options?: Record<string, unknown>): Promise<{ status(): number } | null>;
@@ -469,10 +632,14 @@ export async function openWebMcpBrowser(
     throw new Error(
       "The WebMCP imperative suite could not launch a browser.\n" +
         `  ${error instanceof Error ? error.message : String(error)}\n` +
-        "  Two ways out:\n" +
-        "    1. Point `MCP_TESTS_CHROME_PATH` (or the suite's `executablePath` option) at a Chrome " +
+        "  Three ways out:\n" +
+        "    1. In CI, install one: `npx playwright-core install --with-deps chrome`. Note the " +
+        "spelling — `playwright-core` is the package you already have, and `npx playwright …` " +
+        "would fetch a second one. GitHub's `ubuntu-latest` needs no such step: it ships Google " +
+        "Chrome at `/usr/bin/google-chrome`, which is where the `chrome` channel looks.\n" +
+        "    2. Point `MCP_TESTS_CHROME_PATH` (or the suite's `executablePath` option) at a Chrome " +
         "or Chromium binary. `playwright-core` ships none by design.\n" +
-        "    2. Register only `defineWebMcpDeclarativeSuite(target)`, which needs no browser.",
+        "    3. Register only `defineWebMcpDeclarativeSuite(target)`, which needs no browser.",
     );
   }
 
@@ -480,16 +647,43 @@ export async function openWebMcpBrowser(
   // per-run root. See this module's header.
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
 
-  /** Read one page in an already-open tab, so a caller can keep the tab across navigations. */
-  const readInto = async (page: PlaywrightPage, path: string): Promise<RegisteredToolReading> => {
+  // Before any page script, in every document this context loads. See REGISTRATION_OBSERVER.
+  await context.addInitScript({ content: REGISTRATION_OBSERVER });
+
+  const deadlineMs = resolveRegistrationDeadlineMs(
+    options.registrationTimeoutMs,
+    process.env[REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE],
+  );
+
+  interface WaitedReading {
+    apiPresent: boolean;
+    toolSurface: string;
+    tools: RegisteredWebMcpTool[];
+    registrationObserved: boolean;
+    registrationDelayMs: number;
+  }
+
+  /**
+   * Navigate an already-open tab and wait for the new document to register, so a caller can keep
+   * the tab across navigations.
+   *
+   * @param page - The tab to navigate.
+   * @param path - Path on the canonical origin.
+   * @param baseline - Tool names live at the end of the previous navigation in this tab. Empty for
+   *   a fresh tab; for a walk it is what an earlier document may have left behind, which is what
+   *   keeps the wait from being satisfied by a leak.
+   */
+  const readInto = async (
+    page: PlaywrightPage,
+    path: string,
+    baseline: readonly string[],
+  ): Promise<RegisteredToolReading> => {
     const response = await page.goto(new URL(path, canonicalOrigin).toString(), {
       waitUntil: "load",
     });
-    const reading = await page.evaluate<{
-      apiPresent: boolean;
-      toolSurface: string;
-      tools: RegisteredWebMcpTool[];
-    }>(READ_TOOLS);
+    const reading = await page.evaluate<WaitedReading>(
+      awaitRegistrationScript(baseline, deadlineMs, WEBMCP_REGISTRATION_POLL_MS),
+    );
     return { path, status: response?.status() ?? 0, ...reading };
   };
 
@@ -497,7 +691,7 @@ export async function openWebMcpBrowser(
     async read(path: string): Promise<RegisteredToolReading> {
       const page = await context.newPage();
       try {
-        return await readInto(page, path);
+        return await readInto(page, path, []);
       } finally {
         await page.close();
       }
@@ -507,7 +701,10 @@ export async function openWebMcpBrowser(
       const page = await context.newPage();
       try {
         const readings: RegisteredToolReading[] = [];
-        for (const path of paths) readings.push(await readInto(page, path));
+        for (const path of paths) {
+          const previous = readings[readings.length - 1];
+          readings.push(await readInto(page, path, previous?.tools.map((tool) => tool.name) ?? []));
+        }
         return readings;
       } finally {
         await page.close();
@@ -522,6 +719,11 @@ export async function openWebMcpBrowser(
       const page = await context.newPage();
       try {
         await page.goto(new URL(path, canonicalOrigin).toString(), { waitUntil: "load" });
+        // A fresh tab, so nothing can be live but this document's own registrations — and the call
+        // must not be made before they have landed, or a correct tool is reported unregistered.
+        const waited = await page.evaluate<WaitedReading>(
+          awaitRegistrationScript([], deadlineMs, WEBMCP_REGISTRATION_POLL_MS),
+        );
         const reading = await page.evaluate<{
           apiPresent: boolean;
           toolSurface: string;
@@ -530,7 +732,13 @@ export async function openWebMcpBrowser(
           executorPresent: boolean;
           attempts: ExecutionAttempt[];
         }>(executeToolScript(tool, args));
-        return { path, tool, ...reading };
+        return {
+          path,
+          tool,
+          ...reading,
+          registrationObserved: waited.registrationObserved,
+          registrationDelayMs: waited.registrationDelayMs,
+        };
       } finally {
         await page.close();
       }

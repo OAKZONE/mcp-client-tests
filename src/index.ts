@@ -118,6 +118,16 @@ export {
 } from "./harness/webmcp-lifetime.js";
 
 export {
+  pagesNearDeadline,
+  registrationDelayFinding,
+  resolveRegistrationDeadlineMs,
+  REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE,
+  WEBMCP_REGISTRATION_DEADLINE_MS,
+  WEBMCP_REGISTRATION_POLL_MS,
+  type RegistrationTiming,
+} from "./harness/webmcp-registration.js";
+
+export {
   conditionalDeliveryProblem,
   decodeOriginTrialToken,
   originCanHoldTrialToken,

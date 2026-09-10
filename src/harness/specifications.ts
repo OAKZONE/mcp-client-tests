@@ -129,6 +129,16 @@ const READ_VENDOR_SWEEP = "2026-09-05";
 const READ_WEBMCP_EXECUTION = "2026-09-06";
 
 /**
+ * When the WebMCP registration-timing sources were read, and when the browser observations recorded
+ * beside them were made.
+ *
+ * Its own stamp, for the reason every other one has one: this pass re-read the draft's
+ * `registerTool()` definition and Chrome's WebMCP page looking for a timing requirement, found that
+ * neither states one, and left every other row standing.
+ */
+const READ_WEBMCP_REGISTRATION = "2026-09-10";
+
+/**
  * When RFC 6761 was read.
  *
  * Its own stamp for the same reason every other one has one: this pass read that RFC and nothing
@@ -689,6 +699,38 @@ export const WEBMCP = Object.freeze({
       "tool, optional object inputObject = {}, optional ModelContextExecuteToolOptions options)`)",
     "https://webmachinelearning.github.io/webmcp/#dom-modelcontext-executetool",
     READ_WEBMCP_EXECUTION,
+  ),
+  /**
+   * Nothing states **when** a page must have registered by — and the absence is the finding.
+   *
+   * The draft defines `registerTool()` as a script call and defines how a registration is taken
+   * back; it says nothing about timing, and Chrome's WebMCP page does not either. So there is no
+   * clause to hold a page to, and this package cannot assert one.
+   *
+   * What follows for the suites: the deadline they wait to is **their own number**, overridable per
+   * consumer via `registrationTimeoutMs`. It never appears in a citation. It appears in the
+   * *message* — "registered nothing within 5000 ms of load" is something a reader can act on, and
+   * "registered none by load" is not, because at `load` the normal case cannot have happened yet:
+   * the imperative API exists to publish a live application's own functions, and a live application
+   * registers from a lifecycle hook that fires after hydration.
+   *
+   * Graded down deliberately. A page slower than the deadline is not violating anything, and a
+   * package that asserted a timing number would eventually fail a correct page for being slow.
+   */
+  REGISTRATION_IS_UNTIMED: graded(
+    "WebMCP — Draft Community Group Report §4.2 (`registerTool()` is defined as a script call " +
+      "with no stated deadline), against Chrome for Developers' WebMCP page, which states none " +
+      "either",
+    "https://webmachinelearning.github.io/webmcp/#dom-modelcontext-registertool",
+    READ_WEBMCP_REGISTRATION,
+    "moderate",
+    "the absence of a requirement is what is recorded here, so there is nothing to assert and " +
+      "nothing that could be. The default deadline is this package's own, chosen against a " +
+      "first-hand observation reported on 2026-09-10: a Next.js 16 production build in stock " +
+      "Chrome 152.0.7977.83, four pages registering from a framework lifecycle hook, every one of " +
+      "them completing 220–350 ms after `load` (345–478 ms after navigation start) and none of " +
+      "them registered at `load` itself. Read the delay this run reports as a measurement of your " +
+      "pages, never as a limit the platform imposes",
   ),
   /**
    * A registration belongs to one `Document`, and the only way to take it back is to abort.

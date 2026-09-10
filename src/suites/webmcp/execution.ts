@@ -59,9 +59,13 @@ import {
   schemaProperties,
   type InputSchemaEncoding,
 } from "../../harness/webmcp-execution.js";
+import {
+  REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE,
+  resolveRegistrationDeadlineMs,
+} from "../../harness/webmcp-registration.js";
 import type { McpTestTarget, WebMcpToolCall } from "../../target.js";
 
-import { assertWebMcpApiPresent } from "./browser-support.js";
+import { adviseRegistrationTiming, assertWebMcpApiPresent } from "./browser-support.js";
 
 const SCOPE = "WebMCP tool execution (browser)";
 
@@ -97,6 +101,10 @@ export function defineWebMcpExecutionSuite(
 
     const capability = mcpTarget.webMcp ?? { toolPages: [] };
     const declaredCalls = capability.toolCalls ?? [];
+    const deadlineMs = resolveRegistrationDeadlineMs(
+      browserOptions.registrationTimeoutMs,
+      process.env[REGISTRATION_DEADLINE_ENVIRONMENT_VARIABLE],
+    );
 
     beforeAll(async () => {
       deployment = readRunningDeployment(mcpTarget.id);
@@ -159,10 +167,13 @@ export function defineWebMcpExecutionSuite(
         .filter((entry) => !entry.reading.registered && entry.reading.apiPresent)
         .map(
           (entry) =>
-            `${entry.call.page}: \`${entry.call.tool}\` was not registered when the call was made` +
+            `${entry.call.page}: \`${entry.call.tool}\` was not registered ` +
+            `${entry.reading.registrationDelayMs} ms after \`load\`` +
             (entry.reading.registeredNames.length > 0
               ? ` (registered instead: ${entry.reading.registeredNames.join(", ")})`
-              : " (that page registered nothing)"),
+              : entry.reading.registrationObserved
+                ? " (that page registered nothing under any name)"
+                : ` (that page had registered nothing at all within the ${deadlineMs} ms this run waited)`),
         );
 
       expect(
@@ -170,9 +181,14 @@ export function defineWebMcpExecutionSuite(
         cite(
           WEBMCP.PER_DOCUMENT_LIFETIME,
           "A tool is reachable only from the document that registered it, so a name declared in " +
-            "`webMcp.toolCalls` has to be live on that page by load. Either the name moved, or " +
-            "the registration did not land on that document — and an agent attached to this tab " +
-            "would find exactly what this run found.",
+            "`webMcp.toolCalls` has to be live on that page before it can be called. The run does " +
+            "not sample at `load` — it waits for that page to register, because a registration " +
+            "made from a framework lifecycle hook lands after hydration — so what an agent " +
+            "attached to this tab would find is exactly what this run found.\n" +
+            "  Either the name moved, or the registration did not land on that document. If the " +
+            "message above says the page had registered nothing at all, the page is slower than " +
+            "the deadline or is not registering: raise `registrationTimeoutMs` (or " +
+            "`MCP_TESTS_WEBMCP_REGISTRATION_MS`) to tell the two apart.",
         ),
       ).toEqual([]);
     });
@@ -240,6 +256,7 @@ export function defineWebMcpExecutionSuite(
     });
 
     it("records the shapes this browser used, and what this run could not observe", () => {
+      adviseRegistrationTiming(SCOPE, readings, deadlineMs);
       collectAdvisories(readings, executed, declaredCalls.length);
 
       expect(readings.length, "The `webMcp` capability declared no pages to load.").toBeGreaterThan(

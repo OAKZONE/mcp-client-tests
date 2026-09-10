@@ -102,7 +102,10 @@ and none of its wire — no JSON-RPC, no transport, no server, no OAuth — so n
 published in a page. The *declarative* API is served HTML and provable over the wire; the imperative
 `document.modelContext.registerTool(...)` is reached by an opt-in suite that drives a real Chrome
 through `playwright-core` — an optional peer dependency shipping no browser binaries — and is the
-only way to catch a page whose registration call never landed.
+only way to catch a page whose registration call never landed. That suite **waits** for a page to
+register rather than reading it at `load`, because the API exists to publish a live application's own
+functions and a live application registers after it hydrates. What a CI job needs to run it is in
+**[docs/consuming.md](docs/consuming.md)**, verified against the runner image rather than assumed.
 
 Two more things only a real browser and a real call can reach, and both fail silently. A
 registration outliving the document that made it accumulates across a visitor's navigations with
