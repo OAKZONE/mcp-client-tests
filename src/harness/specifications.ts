@@ -147,6 +147,26 @@ const READ_WEBMCP_REGISTRATION = "2026-09-10";
 const READ_RESERVED_NAMES = "2026-09-09";
 
 /**
+ * When the MCP extensions registry and the extension specifications beside it were read.
+ *
+ * Its own stamp for the reason every other one has one: this pass opened the registry itself, the
+ * Skills-over-MCP proposal that had merged since the last read, the Tasks extension, and the
+ * deprecation registry — and left every other row standing. What it establishes is mostly that the
+ * core did **not** move: the revision is the same, and the deprecation registry's removed-feature
+ * section is still empty.
+ */
+const READ_EXTENSIONS_REGISTRY = "2026-09-22";
+
+/**
+ * When the vendor client-gate sources re-read in this pass were last verified.
+ *
+ * A separate stamp from {@link READ_VENDOR_SWEEP} even though both name a vendor sweep, for the
+ * reason that one is separate from the two before it: re-dating the older constant would claim a
+ * re-read of every clause it covers, when this pass opened only the few rows that moved.
+ */
+const READ_VENDOR_GATES = "2026-09-22";
+
+/**
  * IETF clauses. These bind every OAuth client, so an assertion citing one of these belongs in the
  * shared spine rather than a vendor profile.
  */
@@ -406,7 +426,15 @@ export const MCP = Object.freeze({
     `${MCP_STATELESS}/changelog`,
     READ_STATELESS,
   ),
-  /** Every result carries `resultType` — `complete`, or `input_required`. */
+  /**
+   * Every result carries `resultType` — `complete`, or `input_required` in the core revision.
+   *
+   * **The set is open, not exhaustive.** A negotiated extension may define further values, and the
+   * Tasks extension's `task` is the one in circulation ({@link EXTENSION_TASKS}). Nothing here may
+   * therefore assert that a value it does not recognise is invalid: a server that has negotiated an
+   * extension is entitled to return that extension's value, and a suite treating the core's two as
+   * the whole set would fail it for conforming.
+   */
   RESULT_TYPE: clause(
     "MCP 2026-07-28 — Changelog (`resultType` on every result)",
     `${MCP_STATELESS}/changelog`,
@@ -538,11 +566,27 @@ export const MCP = Object.freeze({
    * The extensions layer: a client declares extensions per request in
    * `_meta["io.modelcontextprotocol/clientCapabilities"].extensions`, and a server declares them on
    * `server/discover` under `capabilities.extensions`.
+   *
+   * The registry the project maintains under `io.modelcontextprotocol/` holds MCP Apps (the UI
+   * extension), Skills ({@link EXTENSION_SKILLS}), Tasks ({@link EXTENSION_TASKS}), OAuth client
+   * credentials, and Enterprise-Managed Authorization.
+   *
+   * **Both declarations are objects keyed by extension identifier, never arrays of names** — the
+   * value is that extension's settings object, and an empty one means "supported, no settings"
+   * (`"extensions": {"io.modelcontextprotocol/skills": {"directoryRead": true}}`). Worth stating
+   * because a reader who assumes a list of strings writes a check that never matches anything a
+   * conforming server sends, and a check that never fires looks exactly like a server with nothing
+   * to declare.
+   *
+   * **Every one of them is negotiated and off by default**, which is what makes this layer safe to
+   * describe and unsafe to assert: a server declaring none is fully conforming, so an extension may
+   * only ever reach a consumer as advice about what a value it returned *means*, never as a
+   * requirement it failed to meet.
    */
   EXTENSIONS: clause(
     "MCP Extensions — capability negotiation (`capabilities.extensions` on `server/discover`)",
     "https://modelcontextprotocol.io/extensions",
-    READ_VENDOR_SWEEP,
+    READ_EXTENSIONS_REGISTRY,
   ),
   /**
    * Server identity — and with it `instructions` — rides the protocol's own metadata channel:
@@ -553,11 +597,49 @@ export const MCP = Object.freeze({
     `${MCP_STATELESS}/changelog`,
     READ_STATELESS,
   ),
-  /** Roots, Sampling, Logging, HTTP+SSE and DCR are deprecated on a twelve-month floor. */
+  /**
+   * Roots, Sampling, Logging, HTTP+SSE and DCR are deprecated on a twelve-month floor.
+   *
+   * **Deprecated is not removed, and the distinction is the whole point of the floor.** A re-read of
+   * the deprecation registry on {@link READ_EXTENSIONS_REGISTRY} found its removed-feature section
+   * still empty, so nothing asserted against a deprecated feature has stopped being true — a server
+   * still speaking one is behind, not broken.
+   */
   DEPRECATIONS: clause(
     "MCP 2026-07-28 — Release announcement (deprecation policy)",
     "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
-    READ_STATELESS,
+    READ_EXTENSIONS_REGISTRY,
+  ),
+  /**
+   * The Tasks extension (`ext-tasks`) — durable handles for work that outlives one call.
+   *
+   * It adds `resultType: "task"` alongside the core's values, with `tasks/get` polling and
+   * `tasks/update` / `tasks/cancel`. Carried here for one reason: it is why
+   * {@link RESULT_TYPE}'s value set must be read as open. Nothing in this package asserts the
+   * extension — it is negotiated and off unless both sides opt in, so a server that has never heard
+   * of it is conforming and must not be advised about it.
+   */
+  EXTENSION_TASKS: clause(
+    "MCP Extensions — Tasks (`ext-tasks`: `resultType: \"task\"`, `tasks/get`, `tasks/update`, `tasks/cancel`)",
+    "https://modelcontextprotocol.io/extensions",
+    READ_EXTENSIONS_REGISTRY,
+  ),
+  /**
+   * Skills over MCP (`ext-skills`) — serving skills at run time over the wire.
+   *
+   * Two things a server author is likely to have wrong, both read from the specification rather than
+   * from commentary about it. **The size figures are not hard limits**: a server *SHOULD NOT* serve a
+   * skill exceeding 512 files or 16 MiB, while a host *MUST* support up to them and *MAY* support
+   * more — so a larger skill is a server-side recommendation breached, never a client-side rejection
+   * guaranteed. And **`skill://` is a SHOULD**, so a skill must not be identified by its URI scheme.
+   *
+   * The extension's directory was renamed from `experimental-ext-skills` to `ext-skills` when the
+   * proposal merged, which invalidates any source URL written against the older path.
+   */
+  EXTENSION_SKILLS: clause(
+    "MCP Extensions — Skills over MCP (`ext-skills`, SEP-2640, merged 2026-09-13)",
+    "https://modelcontextprotocol.io/extensions",
+    READ_EXTENSIONS_REGISTRY,
   ),
 });
 
@@ -889,11 +971,23 @@ export const VENDOR = Object.freeze({
    * form for any authorization server that emits RFC 9207 `iss`; the per-connection
    * `{callback_id}` form is the **fallback** for servers that do not. This package previously
    * asserted the inverse, which is why the date moved on this clause alone.
+   *
+   * **Re-read on {@link READ_VENDOR_GATES}; the registration contract is re-affirmed unchanged.**
+   * ChatGPT supports CIMD with either public-client token exchange (`none`) or signed client
+   * assertion (`private_key_jwt`), and *"Dynamic client registration remains supported when
+   * configured"* — so a deployment advertising both must keep both paths working. No behaviour
+   * statement moved.
+   *
+   * **One source-hygiene fact worth carrying, because it is invisible from a working link.**
+   * `platform.openai.com/docs/mcp` now answers `301 Moved Permanently` to
+   * `developers.openai.com/api/docs/mcp`. Every OpenAI URL in this file already names the
+   * `developers.openai.com` host, so nothing here needed rewriting — but an older link written
+   * against the retired host still resolves through the redirect and will read as current.
    */
   OPENAI_PLUGIN_AUTH: clause(
     "OpenAI — Plugins, Authentication",
     "https://developers.openai.com/plugins/build/auth",
-    READ_VENDOR_SWEEP,
+    READ_VENDOR_GATES,
   ),
   OPENAI_PLUGIN_BUILD: clause(
     "OpenAI — Plugins, Build an MCP server",
@@ -914,6 +1008,43 @@ export const VENDOR = Object.freeze({
     "Anthropic — Claude Code MCP reference",
     "https://code.claude.com/docs/en/mcp",
     READ_STATELESS,
+  ),
+  /**
+   * Claude Code's published `CHANGELOG.md` — the primary source for the behaviour that moves
+   * faster than the reference page describing it.
+   *
+   * Kept apart from {@link ANTHROPIC_CLAUDE_CODE_MCP} rather than folded into it, because they are
+   * two documents read on two different days. Re-stamping the reference page for a fact read in the
+   * changelog would claim a re-read that did not happen, which is the one thing the dates in this
+   * file exist to prevent.
+   *
+   * What the v2.1.271–v2.1.278 entries establish, each quoted from the changelog itself:
+   *
+   * - **The `2026-07-28` probe has no install carve-out left.** Bedrock, Vertex, Foundry and
+   *   telemetry-disabled installs now use the v2 MCP client and `2026-07-28` negotiation with
+   *   direct HTTP servers by default, "as other installs already do"; a user opts out with
+   *   `MCP_SDK_GENERATION=v1` or `MCP_PROTOCOL_NEGOTIATION=legacy` (v2.1.278).
+   * - **A `403 insufficient_scope` is finally diagnosed as itself**: it was reported to the user as
+   *   an expired sign-in, and "the error now names the missing permissions and points to `/mcp`
+   *   re-authentication" (v2.1.278). **The message is all that changed** — nothing states that the
+   *   challenge's `scope` is now unioned into the re-authorization request.
+   * - **Client registrations are no longer mishandled** (v2.1.274): "denying consent forced a new
+   *   one, one for another redirect URI was reused, and a concurrent write could delete a valid one
+   *   or keep a mismatched one".
+   * - **`list_changed` is honoured for prompts and resources without a declared `listChanged`**
+   *   (v2.1.278). Declare the capability regardless; it is the only form every client version acts
+   *   on.
+   * - **Unattended runs gained a bound and a notice**: `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` bounds
+   *   "how long the first non-interactive turn waits for connecting MCP servers (`0` = don't wait)"
+   *   (v2.1.274), and a mid-session disconnect whose automatic reconnection gives up now raises a
+   *   notification pointing at `/mcp` (v2.1.273).
+   * - **Two managed-configuration fixes** (v2.1.273, v2.1.277) — see {@link ANTHROPIC_MANAGED_MCP}.
+   * - **Two auto-mode classifier changes** (v2.1.273, v2.1.278) — see {@link ANTHROPIC_AUTO_MODE}.
+   */
+  ANTHROPIC_CLAUDE_CODE_CHANGELOG: clause(
+    "Anthropic — Claude Code `CHANGELOG.md`, entries v2.1.271 through v2.1.278",
+    "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
+    READ_VENDOR_GATES,
   ),
   /** What a tool description is for, and why an error must be actionable to the model. */
   ANTHROPIC_TOOL_DESIGN: clause(
@@ -948,6 +1079,33 @@ export const VENDOR = Object.freeze({
   // below it is graded down and reaches a consumer only as advice.
   // ---------------------------------------------------------------------------------------------
 
+  /**
+   * GitHub Copilot **code review** — the one surface that documents an annotation requirement, and
+   * enforces it by exclusion.
+   *
+   * Each tool in a server's `tools/list` response must set `annotations.readOnlyHint` to `true`;
+   * code review **excludes a tool when the annotation is missing or set to `false`**. Alongside it,
+   * the repository-level configuration's `tools` field is a required allowlist rather than an
+   * optional filter — and that one configuration is shared by the cloud agent and code review
+   * alike, so a tools list narrowed for one of them narrows the other too.
+   *
+   * **This is the most consequential gate fact in the file, because its failure mode is silence.**
+   * An excluded tool raises no error, reaches no prompt and produces no request against the server;
+   * the operator sees a server that "does not work" and has nothing to debug. Every other
+   * annotation row here describes extra friction — a confirmation, a lost auto-approval — and
+   * friction is at least visible.
+   *
+   * Kept apart from {@link MICROSOFT_VSCODE_ANNOTATIONS} deliberately, and not used to promote it
+   * (MCT02). That row is `moderate` because VS Code's own MCP guide states nothing about
+   * annotations, and that is still true: this is a different surface, documented by a different
+   * vendor team, and one surface's published behaviour is never evidence for another's.
+   */
+  GITHUB_COPILOT_CODE_REVIEW_TOOLS: clause(
+    "GitHub — Configure MCP servers for your repository (`annotations.readOnlyHint` required for " +
+      "code review; tools lacking it are excluded)",
+    "https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/configure-mcp-servers",
+    READ_VENDOR_GATES,
+  ),
   /**
    * Anthropic's connector review criteria — the clearest published statement of what Claude's gate
    * wants, and the source of four separate requirements this package asserts.
@@ -1012,6 +1170,18 @@ export const VENDOR = Object.freeze({
    * messages and the bare tool call, never the server's output — so nothing a tool returns can
    * argue its way past it, and a block is a routine operating condition to design around rather
    * than a verdict on the server.
+   *
+   * **There are two implementations of it, not one, and which one ran is visible to the user.** The
+   * classifier runs either locally or on the platform, and the default settled on the server-side
+   * one for Claude API, Enterprise, Bedrock, Vertex, Foundry and gateway installs, with
+   * `CLAUDE_CODE_AUTO_MODE_SERVER` as the switch and an `Auto mode server` row in `/status` naming
+   * which ran. Two things follow for a server operator. **The gate a call passes is not one fixed
+   * model**, so a block reproduced on one install need not reproduce on another — ask a reporting
+   * user for the `/status` row before treating a denial as deterministic. And **there is a billing
+   * dimension**: the server-side classifier does not charge for classifier overhead and a fallback
+   * to the billed path warns, so a user reporting that these tools *cost* more may be on the
+   * fallback rather than on anything the server did. Source for both:
+   * {@link ANTHROPIC_CLAUDE_CODE_CHANGELOG}.
    */
   ANTHROPIC_AUTO_MODE: clause(
     "Anthropic — How we built Claude Code auto mode (the two-stage classifier, and its figures)",
@@ -1026,6 +1196,18 @@ export const VENDOR = Object.freeze({
    * `claude mcp list` with no warning". Per tool, an organization may set `ask`, which **no allow
    * rule overrides in any permission mode**, or `blocked`, which filters the tool out before Claude
    * sees it.
+   *
+   * **Two fixes make an operator's account of their own policy unreliable on an older client**, both
+   * from {@link ANTHROPIC_CLAUDE_CODE_CHANGELOG}. Until v2.1.273, `allowManagedMcpServersOnly`,
+   * `deniedMcpServers` and `disableClaudeAiConnectors` were **silently ignored when set via MDM or
+   * `managed-settings.json` alongside server-managed settings** — so an administrator could set an
+   * off-switch, see it accepted, and have it apply to nobody. A user's "my organization blocks your
+   * server" and "my organization does not block it" are therefore both untrustworthy below that
+   * version, and a deployment that looked permitted can start being refused on upgrade with nothing
+   * changing server-side. And from v2.1.277 an unreadable or unparseable `managed-mcp.json` **fails
+   * closed**: exclusive MCP control is kept, so every server not delivered by the managed file
+   * itself stops loading. That presents as a total MCP outage on one machine and has no server-side
+   * cause to look for.
    */
   ANTHROPIC_MANAGED_MCP: clause(
     "Anthropic — Control MCP server access for your organization (`managed-mcp.json`, and the " +
@@ -1039,11 +1221,16 @@ export const VENDOR = Object.freeze({
    *
    * Read it as the design constraint behind every other row — every catalog a server publishes is
    * reachable from at least one surface where nothing will confirm anything.
+   *
+   * **Re-read on {@link READ_VENDOR_GATES} and unchanged**, verbatim: *"API consumers are expected
+   * to handle the OAuth flow and obtain the access token prior to making the API call, and to
+   * refresh the token as needed."* The surface still runs no OAuth of its own, so the date moved
+   * and no statement did.
    */
   ANTHROPIC_MESSAGES_CONNECTOR: clause(
     "Anthropic — Messages API MCP connector (no approval surface; the caller's own code decides)",
     "https://platform.claude.com/docs/en/agents-and-tools/mcp-connector",
-    READ_VENDOR_SWEEP,
+    READ_VENDOR_GATES,
   ),
   /**
    * GitHub's organization MCP policy, and the fact that decides an enterprise support question:

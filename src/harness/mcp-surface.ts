@@ -188,6 +188,28 @@ export function advertisedVersions(result: unknown): readonly string[] {
 }
 
 /**
+ * The extension identifiers a `server/discover` result declares.
+ *
+ * **The shape is the whole reason this is a function rather than a field read.** Both extension
+ * declarations are **objects keyed by extension identifier**, whose value is that extension's
+ * settings — `{"io.modelcontextprotocol/skills": {"directoryRead": true}}` — and an empty settings
+ * object means "supported, with none". A reader who assumes a list of names writes a check that
+ * never matches anything a conforming server sends, and a check that never fires is
+ * indistinguishable from a server with nothing to declare. That is the failure this package exists
+ * not to produce, so the shape is pinned here and tested rather than inlined at the one call site.
+ *
+ * @param capabilities - The `capabilities` object from a `server/discover` result.
+ * @returns Every declared extension identifier; an empty list when none is declared, and also when
+ *   `extensions` is present in a shape no conforming server would send.
+ */
+export function declaredExtensions(capabilities: unknown): readonly string[] {
+  const extensions = asRecord(capabilities)?.extensions;
+  if (Array.isArray(extensions)) return [];
+  const record = asRecord(extensions);
+  return record ? Object.keys(record) : [];
+}
+
+/**
  * Say why an icon would not load.
  *
  * The constraint that decides this is not in the protocol document: the one client documented to

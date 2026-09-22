@@ -38,6 +38,58 @@
  *   under hard reopen limits: a stream that keeps closing within ten seconds is reopened three times
  *   and then abandoned. That is a deployment property (proxy idle timeouts), not an OAuth one, so it
  *   is recorded here rather than asserted.
+ *
+ * **Re-read 2026-09-22 against the published `CHANGELOG.md` through v2.1.278. No OAuth field
+ * moved**, and one statement above is corrected while five behaviours are added.
+ *
+ * **🔴 The correction: the `2026-07-28` probe no longer has an install carve-out, and this profile
+ * never recorded that it had one.** The bullet above describes the probe as reaching HTTP and
+ * claude.ai connector servers, without saying that Bedrock, Vertex, Foundry and telemetry-disabled
+ * installs were excluded from it. Claude Code v2.1.278 changed those installs to use the v2 MCP
+ * client and `2026-07-28` negotiation with direct HTTP servers by default, as other installs
+ * already did — so the bullet is now true of every install rather than of most of them, and the
+ * omission has stopped being wrong instead of having been right. The opt-outs are a user's, not a
+ * server's: `MCP_SDK_GENERATION=v1` or `MCP_PROTOCOL_NEGOTIATION=legacy` stops the probe entirely.
+ * A server that sees no `server/discover` from a modern client is looking at one of those two
+ * variables, or at a build below the v2.1.232 runtime floor.
+ *
+ * **🔴 A `403 insufficient_scope` is diagnosed correctly now — and that is the whole of the
+ * change.** Until v2.1.278 a correct `403 insufficient_scope` was reported to the user as an
+ * expired sign-in, so a server doing exactly the right thing produced a support report about a
+ * broken login; the error now names the missing permissions and points at `/mcp` re-authentication.
+ * **Nothing about the scope behaviour moved.** Claude Code still re-authorizes with its existing
+ * pinned set and still does not union the challenge's `scope`, exactly as the third bullet at the
+ * top of this file says — so a scope that exists only in a `403` challenge is still never granted,
+ * however clearly the error now names it. Read this as a better error message, never as step-up
+ * having started to work: a server that moved a permission out of its first authorization on the
+ * strength of it would break for every Claude Code user and see a clearer message about it.
+ *
+ * Four more behaviours, all from the same changelog:
+ *
+ * - **Client registrations are no longer mishandled** (v2.1.274): denying consent forced a new one,
+ *   one for another redirect URI was reused, and a concurrent write could delete a valid one or keep
+ *   a mismatched one. Each is visible from the server's side as a registration pattern that looks
+ *   like abuse — a burst after a cancelled consent screen, a registration presented against the
+ *   wrong redirect URI, a client that vanishes mid-session. Get the client version before tightening
+ *   a registration rate limit on that evidence.
+ * - **`list_changed` is honoured for prompts and resources even when the server never declared
+ *   `listChanged`** (v2.1.278). Declare the capability anyway: it is the only form every client
+ *   version acts on, and an older client still ignores the undeclared notification.
+ * - **An unattended run can now leave a slow server behind on purpose** (v2.1.274):
+ *   `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` bounds how long the first non-interactive turn waits for
+ *   connecting servers, with `0` meaning do not wait at all. The run then proceeds with these tools
+ *   absent rather than failing, so a handshake that depends on an upstream call is a liability here.
+ * - **A mid-session disconnect is announced** (v2.1.273), when automatic reconnection gives up. It
+ *   is a notice to a human pointing at `/mcp`, so it helps an interactive user and does nothing for
+ *   an unattended run.
+ *
+ * Two facts about Claude Code's gate rather than its OAuth are recorded in
+ * `harness/specifications.ts` beside the clauses that state them, because a server cannot see or
+ * fix either: the managed-configuration off-switches that were silently ignored until v2.1.273 and
+ * the unparseable `managed-mcp.json` that now fails closed
+ * ({@link VENDOR.ANTHROPIC_MANAGED_MCP}), and the auto-mode classifier now existing in a local and
+ * a server-side implementation with a billing difference between them
+ * ({@link VENDOR.ANTHROPIC_AUTO_MODE}).
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -115,8 +167,10 @@ export function claudeCodeProfile(
     displayName: "Claude Code (CLI / IDE)",
     documentation: VENDOR.ANTHROPIC_AUTH,
     verifiedAgainst:
-      "Claude Code MCP reference, CHANGELOG v2.1.49–v2.1.238, and the live Claude Code CIMD, " +
-      "read 2026-08-14 and re-read 2026-08-29 for the 2026-07-28 revision — no OAuth field moved",
+      "Claude Code MCP reference and the live Claude Code CIMD, read 2026-08-14 and re-read " +
+      "2026-08-29 for the 2026-07-28 revision; CHANGELOG v2.1.49–v2.1.278, re-read 2026-09-22 — " +
+      "no OAuth field moved in either pass. The 2026-09-22 pass read the changelog only: the " +
+      "reference page and the CIMD keep their earlier dates because neither was reopened",
 
     // CIMD since v2.1.81 (SEP-991), discovered automatically. Claude Code never uses
     // Anthropic-held client credentials; `--client-id` pre-registration and DCR are its alternates.

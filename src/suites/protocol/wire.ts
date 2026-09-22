@@ -46,6 +46,7 @@ import {
 } from "../../harness/mcp-client.js";
 import {
   advertisedVersions,
+  declaredExtensions,
   duplicateToolNames,
   iconSourcingProblem,
   iconThemeCoverageProblem,
@@ -357,7 +358,7 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
       }
 
       const capabilities = orientation?.capabilities as
-        | { tools?: { listChanged?: unknown } }
+        | { tools?: { listChanged?: unknown }; extensions?: Record<string, unknown> }
         | undefined;
       if (orientation && capabilities?.tools?.listChanged !== true) {
         advise(SCOPE, {
@@ -369,6 +370,28 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
             "Declare it and emit the notification, then design as though neither arrived: ship " +
             "additive changes, and never rename or withdraw a tool a cached client may still hold.",
           source: MCP.LIST_CHANGED,
+        });
+      }
+
+      // Declaring an extension is conforming and common; the risk is the asymmetry. Negotiation is
+      // per request, so a server that declares one still meets callers that did not — and every
+      // shipping client today is one of those. This advises only when something was declared,
+      // because a server declaring none has nothing to get wrong here.
+      const declared = declaredExtensions(capabilities);
+      if (declared.length > 0) {
+        advise(SCOPE, {
+          subject: "extension negotiation",
+          finding: `${orientationSource} declares ${declared.map((name) => `\`${name}\``).join(", ")}`,
+          consequence:
+            "Extensions are negotiated per request, and off unless both sides opt in — so every " +
+            "result must still be correct for a caller that declared none. Read the client's " +
+            "declared extensions on the request rather than answering from what you advertised, " +
+            "and keep the un-negotiated path the default. The concrete case is `resultType`: the " +
+            "Tasks extension adds `task` to the core's `complete` and `input_required`, and a " +
+            "caller that never negotiated Tasks has no handling for it. The same asymmetry runs " +
+            "the other way — a value outside the core set is not invalid if the caller asked for " +
+            "the extension that defines it.",
+          source: MCP.EXTENSIONS,
         });
       }
 
@@ -393,9 +416,12 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
           consequence:
             "The revision states that every result carries `resultType` — `complete`, or " +
             "`input_required` for the multi round-trip pattern that replaced server-initiated " +
-            "requests. This is advice rather than a failure only because the sources this package " +
-            "is written from do not settle whether a list result carries it; read the clause and " +
-            "decide, rather than taking silence here as permission.",
+            "requests. Those two are the core's values, not the whole set: a negotiated extension " +
+            "may define more, and the Tasks extension's `task` is the one in circulation, so a " +
+            "value you do not recognise here is not thereby invalid. This is advice rather than a " +
+            "failure only because the sources this package is written from do not settle whether a " +
+            "list result carries it; read the clause and decide, rather than taking silence here " +
+            "as permission.",
           source: MCP.RESULT_TYPE,
         });
       }

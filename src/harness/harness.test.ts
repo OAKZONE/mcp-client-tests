@@ -29,6 +29,7 @@ import {
 } from "./mcp-client.js";
 import {
   advertisedVersions,
+  declaredExtensions,
   duplicateToolNames,
   iconSourcingProblem,
   iconThemeCoverageProblem,
@@ -482,6 +483,35 @@ describe("advertisedVersions", () => {
 
   it("reports none when the result advertises none, rather than inventing one", () => {
     expect(advertisedVersions({ capabilities: {} })).toEqual([]);
+  });
+});
+
+describe("declaredExtensions", () => {
+  it("reads the identifiers out of the object the specification declares them in", () => {
+    // The shape a conforming server sends: keyed by extension identifier, the value being that
+    // extension's settings. An empty settings object means supported-with-none, not absent.
+    expect(
+      declaredExtensions({
+        tools: {},
+        extensions: {
+          "io.modelcontextprotocol/skills": { directoryRead: true },
+          "io.modelcontextprotocol/ui": {},
+        },
+      }),
+    ).toEqual(["io.modelcontextprotocol/skills", "io.modelcontextprotocol/ui"]);
+  });
+
+  it("reports none for a server that declares none", () => {
+    expect(declaredExtensions({ tools: {} })).toEqual([]);
+    expect(declaredExtensions({ extensions: {} })).toEqual([]);
+    expect(declaredExtensions(undefined)).toEqual([]);
+  });
+
+  it("reports none for an array, which is the shape no conforming server sends", () => {
+    // The regression this exists for. Reading `extensions` as a list of names makes the advisory
+    // that cites it silently never fire against a real server — and a check that never fires is
+    // indistinguishable from a server with nothing to declare, so nothing anywhere reports it.
+    expect(declaredExtensions({ extensions: ["io.modelcontextprotocol/skills"] })).toEqual([]);
   });
 });
 
@@ -1406,6 +1436,17 @@ describe("client gates", () => {
 
   it("names the surface with no approval gate at all, which is the design constraint", () => {
     expect(unannotatedConsequences()).toContain("Messages API");
+  });
+
+  it("names the surface that drops an unannotated tool outright, because that one is silent", () => {
+    // Every other consequence in this summary is friction a server author can observe: a
+    // confirmation appears, an auto-approval is lost, a list is truncated. Code review excludes the
+    // tool instead — no error, no prompt, no request arriving — so if this row ever fell out of the
+    // registry, nothing anywhere would say so. That is precisely the failure worth a lock.
+    const summary = unannotatedConsequences();
+
+    expect(summary).toContain("Copilot code review");
+    expect(summary).toMatch(/exclud/i);
   });
 });
 

@@ -77,6 +77,15 @@ export interface ClientGate {
 const SWEEP = "2026-09-05 vendor sweep";
 
 /**
+ * The later sweep that added the surface {@link SWEEP} had no row for.
+ *
+ * Its own constant rather than a bump of {@link SWEEP}, for the reason `specifications.ts` keeps its
+ * read stamps apart: re-dating the older one would claim a re-read of every row it covers, when this
+ * sweep opened only the surface it added.
+ */
+const GATE_SWEEP = "2026-09-22 vendor sweep";
+
+/**
  * Claude's hosted surfaces — claude.ai, Claude Desktop, and Cowork.
  *
  * The surface where annotations buy the most and where the catalog ceiling is least established.
@@ -357,13 +366,70 @@ export const messagesApiGate: ClientGate = Object.freeze({
 });
 
 /**
+ * GitHub Copilot code review — **the surface that refuses silently**.
+ *
+ * Every other row here describes friction: a confirmation, a lost auto-approval, a truncated list.
+ * This one describes disappearance. A tool that does not set `readOnlyHint: true` is excluded from
+ * the run, so it raises no error, reaches no prompt, and produces no request the server could log —
+ * the operator sees "the server does not work" with nothing anywhere to debug.
+ *
+ * Its own row rather than a field on {@link vscodeCopilotGate}, per MCT02. They are two surfaces of
+ * one vendor that disagree on the only question this row exists to answer: the local extension is
+ * *reported* to confirm an unannotated tool, and code review *documents* dropping it.
+ */
+export const copilotCodeReviewGate: ClientGate = Object.freeze({
+  id: "copilot-code-review",
+  displayName: "GitHub Copilot code review",
+  verifiedAgainst: GATE_SWEEP,
+  usesAnnotations: {
+    statement:
+      "requires `annotations.readOnlyHint: true` on every tool in the `tools/list` response — the " +
+      "only surface that states an annotation requirement in its own documentation rather than " +
+      "having one reported of it",
+    source: VENDOR.GITHUB_COPILOT_CODE_REVIEW_TOOLS,
+  },
+  unannotatedConsequence: {
+    statement:
+      "**is excluded from the run entirely** when the annotation is missing or `false` — no error, " +
+      "no prompt, and no request reaching the server, so the absence is invisible from both ends",
+    source: VENDOR.GITHUB_COPILOT_CODE_REVIEW_TOOLS,
+  },
+  toolCap: {
+    statement:
+      "no published count — but the cloud agent's `tools` field is a required allowlist, so the " +
+      "effective list is whatever the consumer enumerated there, not whatever the server serves",
+    source: VENDOR.GITHUB_COPILOT_CODE_REVIEW_TOOLS,
+  },
+  approvalDefault: {
+    statement:
+      "no interactive approval — the review runs with no human present, so exclusion is the whole " +
+      "of the gate",
+    source: VENDOR.GITHUB_COPILOT_CODE_REVIEW_TOOLS,
+  },
+  classifier: {
+    statement: "no tool-call classifier documented",
+    source: VENDOR.ANNOTATION_HANDLING_UNVERIFIED,
+  },
+  adminOffSwitch: {
+    statement:
+      "the same organization MCP policy that governs the other Copilot surfaces, off by default " +
+      "for the subscriptions it covers",
+    source: VENDOR.GITHUB_COPILOT_MCP_POLICY,
+  },
+});
+
+/**
  * Every client surface whose gate this package can describe, in the order a finding names them.
  *
  * Ordered by how decisively the surface acts on what a server publishes, so a reader hits the
  * consequences they can do something about first, and ends on the one that proves the point:
  * a surface where nothing will ask.
+ *
+ * Code review leads because exclusion outranks every other consequence in the list: the surfaces
+ * below it make a tool harder to run, and that one makes it absent.
  */
 export const CLIENT_GATES: readonly ClientGate[] = Object.freeze([
+  copilotCodeReviewGate,
   chatgptGate,
   claudeHostedGate,
   claudeCodeGate,

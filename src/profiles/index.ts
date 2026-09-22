@@ -47,6 +47,7 @@ export {
   claudeCodeGate,
   claudeHostedGate,
   codexCliGate,
+  copilotCodeReviewGate,
   cursorGate,
   messagesApiGate,
   toolCapSummary,

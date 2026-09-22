@@ -41,7 +41,15 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 
 const SCRIPT_DIR = fileURLToPath(new URL(".", import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, "..");
+
+// On Windows `fileURLToPath` yields a LOWERCASE drive letter (`c:\Users\...`), while the shell and
+// every other tool report the path as the drive is actually cased (`C:\Users\...`). Handing the
+// lowercase form to a child as `cwd` makes Vitest resolve the same file under two spellings, and its
+// module graph fails to load with `Cannot read properties of undefined (reading 'config')` — a
+// failure that reads as a broken test suite rather than a path-casing bug, on a suite that passes
+// when run directly. Normalize once here so every `cwd` below is the spelling the rest of the
+// toolchain uses. No-op off Windows, where the pattern cannot match.
+const REPO_ROOT = join(SCRIPT_DIR, "..").replace(/^([a-z]):/, (_, drive) => `${drive.toUpperCase()}:`);
 
 // Run a command line via the platform shell. Avoids DEP0190 (Node 22+'s
 // deprecation of `spawnSync(file, args, { shell: true })`, which

@@ -1,5 +1,90 @@
 # Changelog
 
+## v0.11.0 — The surface that answers by deleting your tool, and a value set we had closed that the specification leaves open
+
+**A client surface was missing from the matrix, and it is the one whose refusal you cannot see.**
+GitHub Copilot code review requires `annotations.readOnlyHint: true` on every tool in a
+`tools/list` response, and **excludes any tool where the annotation is missing or `false`**. Not a
+confirmation, not a warning — the tool is absent from the run. No error is raised, no prompt
+appears, and no request reaches the server, so an operator sees "your server does not work" with
+nothing anywhere to debug it from.
+
+Every other row in the gate matrix describes friction: a call that must be confirmed, an
+auto-approval that is lost, a list that gets truncated. Friction is at least observable. This one is
+the reason `copilotCodeReviewGate` now leads `CLIENT_GATES` — exclusion outranks every other
+consequence in the list, and it is the only one a server author has no way to discover.
+
+It is a **new row rather than a field on the VS Code row**, per MCT02. Those are two surfaces of one
+vendor that disagree on the only question the row exists to answer: the local extension is
+*reported* to confirm an unannotated tool, and code review *documents* dropping it. The VS Code row
+stays `moderate` for the reason it always was — VS Code's own MCP guide states nothing about
+annotations, and that is still true. One surface's published behaviour is never evidence for
+another's.
+
+### Fixed — an assertion that could have failed a conforming server
+
+`resultType` was documented here as `complete` or `input_required`. Those are the **core revision's**
+values, not the whole set: a negotiated extension may define more, and the Tasks extension's `task`
+is the one in circulation. A server that negotiated Tasks and returned `task` was, on the old
+reading, returning something this package described as outside the specification.
+
+The advisory never asserted the set — it checks only for presence — so no consumer can have been
+failed by it. It is fixed anyway, in the clause, the doc comment and the advisory prose, because the
+prose is what a reader acts on, and "these are the two values" is the kind of sentence somebody
+builds a stricter check on later.
+
+### Added
+
+- **`copilotCodeReviewGate`** in `src/profiles/client-gates.ts`, exported by name and first in
+  `CLIENT_GATES`, so it leads `unannotatedConsequences()`. A test locks its presence, because a row
+  whose subject is silent failure should not be able to fall out of the registry silently.
+- **An advisory on extension negotiation** in the wire suite. `MCP.EXTENSIONS` had been defined and
+  never cited, so a server declaring extensions was told nothing. Negotiation is **per request**, and
+  a server that declares one still meets callers that declared none — which today is every shipping
+  client. The advisory fires only when something was declared, because a server declaring nothing
+  has nothing here to get wrong.
+- **`MCP.EXTENSION_TASKS`** and **`MCP.EXTENSION_SKILLS`**, carrying two normative points a server
+  author is likely to have backwards. Skills-over-MCP's **512 files and 16 MiB are not hard limits**
+  — a server *SHOULD NOT* exceed them while a host *MUST* support up to them and *MAY* support more,
+  so a larger skill is a recommendation breached, never a rejection guaranteed. And **`skill://` is a
+  SHOULD**, so a skill must not be identified by its URI scheme. The extension's directory was
+  renamed from `experimental-ext-skills` to `ext-skills` when the proposal merged, which invalidates
+  any source URL written against the older path.
+- **`VENDOR.ANTHROPIC_CLAUDE_CODE_CHANGELOG`**, kept apart from the reference-page clause so that
+  page keeps its own date rather than inheriting a re-read it did not get.
+
+### Changed — vendor behaviour, re-read 2026-09-22
+
+- **The `2026-07-28` probe no longer has an install carve-out.** Bedrock, Vertex, Foundry and
+  telemetry-disabled installs now default to the v2 client and negotiate the revision like every
+  other install. The opt-outs that remain are a *user's*, not a server's.
+- **`403 insufficient_scope` is no longer mis-reported as an expired sign-in — and nothing else
+  changed.** Read that as a better error message, never as step-up having started to work: the scope
+  **union still does not happen**. A server that moved a permission out of its first authorization on
+  the strength of this would break for every Claude Code user, and now see a clearer message while
+  doing so.
+- Dynamic client registration mishandling fixed; `list_changed` for prompts and resources honoured
+  even where a server never declared `listChanged`; `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` and a
+  mid-session disconnect notification recorded for unattended runs; managed-configuration
+  off-switch keys silently ignored until v2.1.273, with an unparseable `managed-mcp.json` now
+  failing closed; the auto-mode classifier now two implementations, local and server-side.
+- **Re-verified unchanged:** the Messages API connector still runs no OAuth, and **no shipping client
+  supports `client_credentials`** — the OAuth-client-credentials *extension* existing in the MCP
+  registry is not a client implementing it. The deprecation registry's removed-feature section is
+  still empty, so nothing asserted against a deprecated feature has stopped being true.
+
+### Not re-verified, and not re-stamped
+
+ChatGPT's **consumer-connector** documentation returned HTTP 403 to this sweep. Its live-connector
+observations keep their earlier date and the developer-facing half carries the new one, rather than
+one stamp moving across both. A date in this package means somebody actually looked.
+
+### Internal — nothing a consumer installs
+
+`scripts/release.mjs` handed its child processes a Windows path with a lowercase drive letter, which
+made Vitest resolve the suite under a second spelling and fail to load it at all. The release refused
+on a green suite, and the error it printed described a broken test file rather than a path.
+
 ## v0.10.0 — The browser suites wait for your page to register, instead of reading it before it can have
 
 **If you were told your pages register no WebMCP tools, you were told something false.** The browser

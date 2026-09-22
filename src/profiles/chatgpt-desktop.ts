@@ -29,6 +29,21 @@
  * The profile still **drives** the per-connection form by default, because that is the form a
  * server reaches without qualifying for anything — but the suite now reads the deployment's own
  * `iss` advertisement and reports which of the two it has actually earned.
+ *
+ * **Re-read 2026-09-22 against OpenAI's plugin authentication and registration pages. Nothing
+ * moved.** CIMD is re-affirmed with either public-client token exchange (`none`) or signed client
+ * assertion (`private_key_jwt`), and dynamic client registration *"remains supported when
+ * configured"* — so a deployment advertising both still has to keep both paths working. The
+ * `platform.openai.com/docs/mcp` documentation home now answers `301 Moved Permanently` to
+ * `developers.openai.com/api/docs/mcp`; every OpenAI URL this package cites already names the
+ * `developers.openai.com` host, so no link here needed rewriting.
+ *
+ * **What that pass did NOT cover, stated because an unrefreshed fact reads exactly like a
+ * refreshed one.** It read the developer-facing contract only. OpenAI's consumer-facing connector
+ * material is served from a host that answered the sweep with HTTP `403`, so nothing sourced from
+ * it was re-verified — and the live-connector observation behind
+ * `appendsOfflineAccessFromAuthorizationServerMetadata` below is a first-hand reproduction from
+ * 2026-08-15 that this pass did not repeat either. Both keep their earlier dates.
  */
 
 import { VENDOR } from "../harness/specifications.js";
@@ -152,7 +167,11 @@ export function chatgptDesktopProfile(
       "re-read 2026-08-29 including the plugin changelog to 2026-08-21, and corrected 2026-09-05 " +
       "when the redirect-URI guidance was found inverted — the stable " +
       "`connector_platform_oauth_redirect` is the recommended form for an authorization server " +
-      "emitting RFC 9207 `iss`, and the per-connection `{callback_id}` URI is the fallback",
+      "emitting RFC 9207 `iss`, and the per-connection `{callback_id}` URI is the fallback. " +
+      "Re-read 2026-09-22 against the plugin authentication and registration pages only, which " +
+      "re-affirm CIMD with `none` or `private_key_jwt` and DCR when configured, and moved nothing; " +
+      "the live-connector observations keep their 2026-08-15 date because that pass did not " +
+      "reproduce them",
 
     // ChatGPT supports CIMD, DCR, and pre-registration, and the plugin builder can select DCR even
     // when CIMD is available — so a deployment advertising both must keep both paths working. This
