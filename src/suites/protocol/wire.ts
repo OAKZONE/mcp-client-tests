@@ -21,10 +21,8 @@
  * suite and never fail the run, so adopting a new version of this package can turn a green run red
  * only through a real requirement. See `harness/advisory.ts`.
  *
- * **One thing is advised rather than asserted because its placement is not established** in the
- * sources this package is written from: `resultType` on a *list* result. Pinning an uncertain
- * placement as a requirement risks failing a correct server, which is the failure mode that gets a
- * whole gate switched off.
+ * `resultType` is required on results of this revision, including lists. The current schema
+ * settles the placement; negotiated extensions may add values beyond the core result types.
  *
  * The suite needs **no capability**. A server with no authorization at all gets every assertion
  * below; one that gates its endpoint gets them through a credential obtained from the target's
@@ -46,6 +44,7 @@ import {
 } from "../../harness/mcp-client.js";
 import {
   advertisedVersions,
+  cachingHintsProblem,
   declaredExtensions,
   duplicateToolNames,
   iconSourcingProblem,
@@ -53,7 +52,6 @@ import {
   inputSchemaProblem,
   publishedIcons,
   readCachingHints,
-  resultTypeOf,
   serverIdentity,
   toolNameProblem,
   type ServerIdentity,
@@ -395,37 +393,6 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
         });
       }
 
-      // Gated on the server speaking the revision at all. Against one that does not, the
-      // `server/discover` failure is the finding, and advising about a field of a revision it has
-      // not adopted would bury it under its own consequences.
-      const missingResultType = (
-        discoverResult
-          ? [
-              ["`server/discover`", resultTypeOf(discoverResult)],
-              toolsListResult ? ["`tools/list`", resultTypeOf(toolsListResult)] : undefined,
-            ]
-          : []
-      ).filter(
-        (entry): entry is [string, string | undefined] =>
-          entry !== undefined && entry[1] === undefined,
-      );
-      if (missingResultType.length > 0) {
-        advise(SCOPE, {
-          subject: "`resultType`",
-          finding: `${missingResultType.map(([method]) => method).join(" and ")} carry no \`resultType\``,
-          consequence:
-            "The revision states that every result carries `resultType` — `complete`, or " +
-            "`input_required` for the multi round-trip pattern that replaced server-initiated " +
-            "requests. Those two are the core's values, not the whole set: a negotiated extension " +
-            "may define more, and the Tasks extension's `task` is the one in circulation, so a " +
-            "value you do not recognise here is not thereby invalid. This is advice rather than a " +
-            "failure only because the sources this package is written from do not settle whether a " +
-            "list result carries it; read the clause and decide, rather than taking silence here " +
-            "as permission.",
-          source: MCP.RESULT_TYPE,
-        });
-      }
-
       const listScope = readCachingHints(toolsListResult).cacheScope;
       if (connection.accessToken !== undefined && listScope === "public") {
         advise(SCOPE, {
@@ -626,13 +593,18 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
     });
 
     describe("caching hints", () => {
-      /** What a conformant cacheable result looks like, rendered so a failure reads plainly. */
-      const HINTS = /^ttlMs=\d+ cacheScope=(public|private)$/;
-
-      function describeHints(result: Record<string, unknown>): string {
-        const hints = readCachingHints(result);
-        return `ttlMs=${hints.ttlMs ?? "absent"} cacheScope=${hints.cacheScope ?? "absent"}`;
-      }
+      it.each(CACHEABLE_LIST_METHODS)("`%s` results declare their resultType", async (method) => {
+        const result = firstResult(await call(method));
+        if (!result) return;
+        const type = result.resultType;
+        expect(
+          typeof type === "string" && type.length > 0,
+          cite(MCP.RESULT_TYPE,
+            "Every result on revision 2026-07-28 MUST include resultType, including list results. " +
+              "Negotiated extensions may define additional values; the core's set is not exhaustive.",
+          ),
+        ).toBe(true);
+      });
 
       it.each(CACHEABLE_LIST_METHODS)("are carried on `%s`", async (method) => {
         const result = firstResult(await call(method));
@@ -641,16 +613,17 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
         if (!result) return;
 
         expect(
-          describeHints(result),
+          cachingHintsProblem(result),
           cite(
             MCP.CACHING_HINTS,
-            "`ttlMs` and `cacheScope` are required on `server/discover`, on every list, and on " +
-              "`resources/read`. Absent is not neutral: a client assumes `ttlMs: 0` and treats the " +
+            "Complete results of `server/discover`, every core list, and `resources/read` require " +
+              "non-negative integer `ttlMs` and public/private `cacheScope`. Intermediate " +
+              "`input_required` results are not cacheable. A client assumes `ttlMs: 0` and treats the " +
               "result as immediately stale, so omitting them asks every client to re-fetch " +
               "everything, forever. Set `ttlMs` to the shortest interval you can actually serve, " +
               "and `cacheScope` to `private` for anything filtered per user.",
           ),
-        ).toMatch(HINTS);
+        ).toBeUndefined();
       });
 
       it("are carried on `resources/read`", async () => {
@@ -664,14 +637,19 @@ export function defineWireConformanceSuite(mcpTarget: McpTestTarget): void {
         if (!read) return;
 
         expect(
-          describeHints(read),
+          typeof read.resultType === "string" && read.resultType.length > 0,
+          cite(MCP.RESULT_TYPE, "resources/read results also MUST carry resultType on this revision."),
+        ).toBe(true);
+
+        expect(
+          cachingHintsProblem(read),
           cite(
             MCP.CACHING_HINTS,
             "`resources/read` is named alongside the lists: a client caches a resource's content " +
               "on the same hints, and an absent `ttlMs` makes every read of an unchanged resource " +
               "a fresh fetch.",
           ),
-        ).toMatch(HINTS);
+        ).toBeUndefined();
       });
     });
   });

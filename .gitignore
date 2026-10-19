@@ -18,6 +18,7 @@ Thumbs.db
 .claude/
 .codex/
 .github/instructions/
+.github/agents/
 .github/copilot-instructions.md
 .github/workflows/claude.yml
 .github/workflows/codex.yml

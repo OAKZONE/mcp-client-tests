@@ -96,6 +96,10 @@ asks whether the surface satisfies the specification. `tool-surface` asks what s
 client will do with a surface that already does — because between `tools/list` and execution sit
 five layers the client owns, and a call can die at any of them with nothing reported back to you.
 
+For **scheduled ChatGPT Chat writes**, the tool-surface report includes annotation and approval
+advisories. [The troubleshooting guide](docs/chatgpt-scheduled-writes.md) explains what servers can
+fix, what operators must verify, and why Allow all actions does not guarantee unattended execution.
+
 **`webmcp` asserts against a different specification from the rest.** WebMCP is the browser API that
 lets a page hand its own functions to an agent attached to the browser. It borrows MCP's vocabulary
 and none of its wire — no JSON-RPC, no transport, no server, no OAuth — so no MCP clause binds a tool
@@ -110,12 +114,11 @@ functions and a live application registers after it hydrates. What a CI job need
 Two more things only a real browser and a real call can reach, and both fail silently. A
 registration outliving the document that made it accumulates across a visitor's navigations with
 nothing thrown — invisible to any suite that opens a fresh tab per page, which is every other suite
-here. And the shapes a caller touches on **every** call are contested: the draft types
-`RegisteredTool.inputSchema` as an object in its IDL and as that object stringified in its supporting
-concepts, and the shipping implementation wants a JSON string where the draft's `executeTool` takes
-an object. The suite reports what the browser under test actually did rather than picking a winner,
-because a page built against one reading and tested against a stub of the same reading is green in
-its own suite and broken in front of every user.
+here. The current WebMCP draft exposes an optional object `inputSchema` and accepts object arguments.
+Older Chrome exposed string schemas and required JSON-string arguments. The suite records the
+browser's shape and selects the corresponding argument encoding, calling each declared tool once.
+Omitted schemas are allowed; provided schemas must be readable. Handler failures are never retried
+with another encoding.
 
 Reachability is separate from registration, and is checked without a browser: in a stock browser
 `document.modelContext` exists only where the response carried an origin-trial token, so the token is

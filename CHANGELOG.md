@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.12.0 — Refresh MCP conformance and diagnose scheduled ChatGPT write approvals
+
+**Minor release:** new assertions and corrected vendor facts can change a consumer's run.
+Previously green servers may now fail the result-envelope or advertised Skills checks below.
+The new scheduled-Chat findings are advisories, not assertions that a server can guarantee approval.
+
+- Add the exported `chatgptScheduledChatGate` profile and distinguish scheduled Chat from interactive
+  ChatGPT. Report declared writes, missing or invalid OpenAI publication annotations, destructive
+  hints and descriptions that claim blanket approval, with evidence grades and actionable guidance.
+- Correct the suggestion that read-only annotations guarantee unprompted execution. Tool enablement,
+  app permissions, workspace policy, provider authorization and host safety checks are separate
+  controls. An "Allow all" setting does not guarantee unattended writes.
+- Explain how to diagnose a pending approval versus a denial or provider authorization failure,
+  verify whether a call reached the server, and test two scheduled runs. Cross-run approval
+  persistence remains unverified; no general fix or server-side bypass is established. See the
+  [scheduled ChatGPT writes guide](docs/chatgpt-scheduled-writes.md).
+
+- Upgrade the optional private agent toolkit from v0.70.0 to v0.79.0; gitignore its new Copilot
+  agent output. Exclude local `docs/todo` notes from the npm package as well as from git.
+- Assert required `resultType` on the stateless revision's result envelopes. Validate caching fields
+  on complete results without requiring them on `input_required` intermediates.
+- Add Skills extension metadata conformance for servers that advertise it: Resources capability,
+  paginated list/get responses, caching hints, frontmatter and file-manifest structure.
+- Update WebMCP to the current optional object-schema contract. Select the detected browser's
+  argument encoding and execute each declared call once, including when a handler rejects input.
+- Refresh Claude Code changelog facts through v2.1.303, Codex approval-mode facts, ChatGPT's custom
+  server guide, Copilot CLI's headless grant advisory, and Final Tasks/Server Cards status.
+- Patch compatible dependencies, including Vitest 4.1.12; audit reports zero vulnerabilities.
+
+Validation: typecheck, lint, **253 harness tests** and build pass. A real-consumer run using this
+checkout passed **130 tests across six files**, with two optional Skills tests skipped. It exercised
+the diagnostics without invoking write tools; it did not reproduce a scheduled run inside ChatGPT.
+The positive Skills extension path has fixture coverage but has not been run against a live Skills server.
+Sources and coverage boundaries: [verification record](docs/verification-2026-10-19.md).
+
 ## v0.11.0 — The surface that answers by deleting your tool, and a value set we had closed that the specification leaves open
 
 **A client surface was missing from the matrix, and it is the one whose refusal you cannot see.**

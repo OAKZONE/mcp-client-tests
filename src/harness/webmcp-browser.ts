@@ -452,16 +452,15 @@ ${READ_ONCE}
 }
 
 /**
- * The script that calls one tool, once per published argument encoding.
+ * The script that calls one tool with the argument encoding indicated by its published schema.
  *
  * **The tool object never leaves the page.** `executeTool` takes the `RegisteredTool` the surface
  * handed out, and that object cannot be carried across the evaluation boundary and back — so the
  * whole call, from finding the tool by name to catching the rejection, happens in the tab.
  *
- * Both encodings are attempted unconditionally. The draft types the argument as an `object`; the
- * shipping implementation is reported to require a JSON string, and only the browser under test can
- * settle which it is. A run that stopped at the first success would record half the answer, and half
- * the answer is what lets a page ship built against the wrong one.
+ * The current draft takes an object. Older Chrome returns a string schema and takes a JSON string;
+ * feature-detect that legacy surface rather than version-detecting or executing the tool twice.
+ * A handler rejection must not trigger a retry under another encoding.
  *
  * The rejection is flattened to `Name: message` on the way out, because a `DOMException` does not
  * survive serialization and its `name` is the part that identifies the failure.
@@ -470,7 +469,7 @@ ${READ_ONCE}
  * @param args - The arguments to call it with.
  * @returns The script source.
  */
-function executeToolScript(toolName: string, args: Readonly<Record<string, unknown>>): string {
+export function executeToolScript(toolName: string, args: Readonly<Record<string, unknown>>): string {
   // Embedded as a JSON string and parsed in the page, so no argument value can terminate the
   // literal or change the meaning of the script around it.
   const request = JSON.stringify(JSON.stringify({ tool: toolName, args }));
@@ -527,16 +526,15 @@ function executeToolScript(toolName: string, args: Readonly<Record<string, unkno
   };
 
   const attempts = [];
-  for (const encoding of ["object", "json-string"]) {
-    const argument = encoding === "object" ? request.args : JSON.stringify(request.args);
-    try {
-      const result = await executor.executeTool(tool, argument);
-      attempts.push({ encoding, accepted: true, result: carry(result) });
-    } catch (error) {
-      const name = (error && error.name) || "Error";
-      const message = (error && error.message) || String(error);
-      attempts.push({ encoding, accepted: false, error: name + ": " + message });
-    }
+  const encoding = typeof tool.inputSchema === "string" ? "json-string" : "object";
+  const argument = encoding === "object" ? request.args : JSON.stringify(request.args);
+  try {
+    const result = await executor.executeTool(tool, argument);
+    attempts.push({ encoding, accepted: true, result: carry(result) });
+  } catch (error) {
+    const name = (error && error.name) || "Error";
+    const message = (error && error.message) || String(error);
+    attempts.push({ encoding, accepted: false, error: name + ": " + message });
   }
 
   return { ...base, registered: true, executorPresent: true, attempts };

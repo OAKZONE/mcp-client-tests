@@ -200,12 +200,14 @@ export function callToolMessage(
  * @param method - The JSON-RPC method, e.g. `server/discover` or `tools/list`.
  * @param params - Method parameters; `_meta` is added to them.
  * @param id - The JSON-RPC id.
+ * @param clientCapabilities - Capabilities supported by this client on this request.
  * @returns The message.
  */
 export function statelessMessage(
   method: string,
   params: Record<string, unknown> = {},
   id: string | number = 1,
+  clientCapabilities: Readonly<Record<string, unknown>> = {},
 ): unknown {
   return {
     jsonrpc: "2.0",
@@ -215,7 +217,7 @@ export function statelessMessage(
       ...params,
       _meta: {
         "io.modelcontextprotocol/protocolVersion": MCP_STATELESS_REVISION,
-        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientCapabilities": clientCapabilities,
       },
     },
   };

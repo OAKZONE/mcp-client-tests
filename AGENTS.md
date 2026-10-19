@@ -82,7 +82,7 @@ someone's constants back at them.
   no server, no OAuth. So an assertion about a page-published tool cites `WEBMCP`, never `MCP`, and
   an MCP rule (tool-name grammar, caching hints, `resultType`) has no standing over one. The gap is
   where the risk sits: a WebMCP tool runs in the user's tab, in a live authenticated session, with
-  no token and no scope, and its three annotations are **hints no agent must honour**. The
+  no token and no scope, and its annotations are **hints no agent must honour**. The
   *declarative* API crosses a socket and is read from served HTML; the *imperative* API is a
   JavaScript call, so it is reached only by `suites/webmcp/imperative.ts`, which drives a real
   Chrome through `playwright-core` (an **optional peer dependency**, no binaries). That suite is

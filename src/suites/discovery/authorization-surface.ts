@@ -341,6 +341,19 @@ function collectAdvisories(reading: DiscoveryReading): void {
   const asScopes = stringList(as.scopes_supported);
   const prmScopes = stringList(prm.scopes_supported);
 
+  if (stringList(as.grant_types_supported).includes("client_credentials")) {
+    advise(SCOPE, {
+      subject: "headless client credentials",
+      finding: "the authorization server advertises client_credentials",
+      consequence:
+        "Copilot CLI supports this grant from 1.0.40; this is a separate client surface from " +
+        "VS Code's local MCP client. Advertising the grant does not prove a working headless " +
+        "connection, and this discovery run obtains no machine credential. Support for the " +
+        "MCP OAuth Client Credentials extension is a separate negotiation question.",
+      source: VENDOR.GITHUB_COPILOT_RUNTIME_OAUTH,
+    });
+  }
+
   // Stated every run: discovery being correct is not authorization working.
   advise(SCOPE, {
     subject: "what this family reached",

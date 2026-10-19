@@ -2,11 +2,11 @@
  * The normative sources this conformance suite is written against, and nothing else.
  *
  * **Read this before adding an assertion.** Every expectation in
- * `src/__tests__/integration/mcp-compliance/` must trace to a clause below. The suite exists to
+ * `src/suites/` must trace to a clause below. The suite exists to
  * check this deployment against what the specifications and the vendors publish — never against
  * what this repository happens to do. An assertion with no citation is an assertion about our own
- * implementation, which proves nothing (`docs/decisions/DEC-ARC-052-…`: a test written from our own
- * assumptions cannot catch a wrong assumption).
+ * implementation, which proves nothing: a test written from our own assumptions cannot catch a
+ * wrong assumption.
  *
  * The citation travels into the failure message via {@link cite}, so a red test in six months tells
  * the next reader *which clause* is unmet and where to read it — including for a real-world incident
@@ -165,6 +165,9 @@ const READ_EXTENSIONS_REGISTRY = "2026-09-22";
  * re-read of every clause it covers, when this pass opened only the few rows that moved.
  */
 const READ_VENDOR_GATES = "2026-09-22";
+
+/** Only sources actually reopened during the October refresh use this stamp. */
+const READ_OCTOBER = "2026-10-19";
 
 /**
  * IETF clauses. These bind every OAuth client, so an assertion citing one of these belongs in the
@@ -436,18 +439,19 @@ export const MCP = Object.freeze({
    * the whole set would fail it for conforming.
    */
   RESULT_TYPE: clause(
-    "MCP 2026-07-28 — Changelog (`resultType` on every result)",
-    `${MCP_STATELESS}/changelog`,
-    READ_STATELESS,
+    "MCP 2026-07-28 — Schema (`Result.resultType` is required; negotiated extensions may add values)",
+    "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.ts",
+    READ_OCTOBER,
   ),
   /**
-   * `ttlMs` and `cacheScope` MUST be present on `server/discover`, on every list method, and on
-   * `resources/read`. An absent `ttlMs` means *immediately stale*, not *cache forever*.
+   * `ttlMs` and `cacheScope` MUST be present on complete results of the named operations.
+   * Intermediate `input_required` results are not cacheable. An absent `ttlMs` means stale.
    */
   CACHING_HINTS: clause(
-    "MCP 2026-07-28 — Utilities: Caching (`ttlMs` and `cacheScope` are required)",
+    "MCP 2026-07-28 — Utilities: Caching (complete results require non-negative integer `ttlMs` " +
+      "and `cacheScope`; intermediate `input_required` results carry neither)",
     `${MCP_STATELESS}/server/utilities/caching`,
-    READ_STATELESS,
+    READ_OCTOBER,
   ),
   /** `cacheScope: "public"` permits a result to be served across authorization contexts. */
   CACHE_SCOPE: clause(
@@ -578,10 +582,9 @@ export const MCP = Object.freeze({
    * conforming server sends, and a check that never fires looks exactly like a server with nothing
    * to declare.
    *
-   * **Every one of them is negotiated and off by default**, which is what makes this layer safe to
-   * describe and unsafe to assert: a server declaring none is fully conforming, so an extension may
-   * only ever reach a consumer as advice about what a value it returned *means*, never as a
-   * requirement it failed to meet.
+   * **Extensions are opt-in.** A server declaring none is conforming. Extension-specific MUSTs may
+   * be asserted only after its declaration has been observed and the request declares client support;
+   * absence alone is never a finding.
    */
   EXTENSIONS: clause(
     "MCP Extensions — capability negotiation (`capabilities.extensions` on `server/discover`)",
@@ -620,9 +623,9 @@ export const MCP = Object.freeze({
    * of it is conforming and must not be advised about it.
    */
   EXTENSION_TASKS: clause(
-    "MCP Extensions — Tasks (`ext-tasks`: `resultType: \"task\"`, `tasks/get`, `tasks/update`, `tasks/cancel`)",
-    "https://modelcontextprotocol.io/extensions",
-    READ_EXTENSIONS_REGISTRY,
+    "SEP-2663 — Tasks Extension (Final; `resultType: \"task\"`, `tasks/get`, `tasks/update`, `tasks/cancel`)",
+    "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2663-tasks-extension.md",
+    READ_OCTOBER,
   ),
   /**
    * Skills over MCP (`ext-skills`) — serving skills at run time over the wire.
@@ -637,9 +640,22 @@ export const MCP = Object.freeze({
    * proposal merged, which invalidates any source URL written against the older path.
    */
   EXTENSION_SKILLS: clause(
-    "MCP Extensions — Skills over MCP (`ext-skills`, SEP-2640, merged 2026-09-13)",
-    "https://modelcontextprotocol.io/extensions",
-    READ_EXTENSIONS_REGISTRY,
+    "Skills over MCP — Capability Negotiation and Listing / Getting a Skill " +
+      "(advertised servers implement both methods and Resources; complete results require caching hints)",
+    "https://github.com/modelcontextprotocol/ext-skills/blob/main/specification/stable/skills.mdx",
+    READ_OCTOBER,
+  ),
+  SKILL_MANIFEST: clause(
+    "Skills over MCP — Skill Entries and Resources (frontmatter, explicit file manifests or " +
+      "`dynamic`, SHA-256 digests and byte sizes; no mandatory `skill://` scheme or name uniqueness)",
+    "https://github.com/modelcontextprotocol/ext-skills/blob/main/specification/stable/skills.mdx#skill-entries",
+    READ_OCTOBER,
+  ),
+  EXTENSION_SERVER_CARD: clause(
+    "SEP-2127 — MCP Server Cards (Final; optional static remote-connectivity metadata, " +
+      "not an authoritative primitive listing or security decision)",
+    "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2127-mcp-server-cards.md",
+    READ_OCTOBER,
   ),
 });
 
@@ -751,24 +767,12 @@ export const WEBMCP = Object.freeze({
     "https://developer.chrome.com/docs/ai/webmcp",
     READ_VENDOR_SWEEP,
   ),
-  /**
-   * What a registered tool's `inputSchema` is — and the draft carries **both** answers.
-   *
-   * The IDL types `RegisteredTool.inputSchema` as `object`. The supporting concepts one section
-   * above type a tool definition's input schema as *a string*, and say so explicitly for the
-   * imperative form: "this is the stringified representation of `inputSchema`". A page passes an
-   * object to `registerTool` and what comes back out of `getTools()` is the other one.
-   *
-   * So the shape a reader will meet is not settled by reading harder, and no assertion here picks a
-   * winner between them. What is assertable is what both readings agree on: there is a schema, and
-   * it describes an object's properties. Which encoding a browser hands back is recorded.
-   */
+  /** The public schema is an optional object; internal string storage is not the caller API. */
   INPUT_SCHEMA_SHAPE: clause(
-    "WebMCP — Draft Community Group Report §4.2 (`RegisteredTool.inputSchema` is IDL `object`, " +
-      "while a tool definition's input schema is a string — the stringified representation for " +
-      "imperatively registered tools)",
+    "WebMCP — Draft Community Group Report §4.2.6 (`RegisteredTool.inputSchema` is optional " +
+      "IDL `object`; legacy Chrome exposed a JSON string)",
     "https://webmachinelearning.github.io/webmcp/#dictdef-registeredtool",
-    READ_WEBMCP_EXECUTION,
+    READ_OCTOBER,
   ),
   /**
    * `executeTool(tool, inputObject, options)` — the arguments go in as an IDL `object`, and the
@@ -778,9 +782,10 @@ export const WEBMCP = Object.freeze({
    */
   EXECUTE_TOOL: clause(
     "WebMCP — Draft Community Group Report §4.2 (`Promise<DOMString> executeTool(RegisteredTool " +
-      "tool, optional object inputObject = {}, optional ModelContextExecuteToolOptions options)`)",
+      "tool, optional object inputObject, optional ModelContextExecuteToolOptions options)`; " +
+      "omitted input becomes an empty object)",
     "https://webmachinelearning.github.io/webmcp/#dom-modelcontext-executetool",
-    READ_WEBMCP_EXECUTION,
+    READ_OCTOBER,
   ),
   /**
    * Nothing states **when** a page must have registered by — and the absence is the finding.
@@ -840,19 +845,14 @@ export const WEBMCP = Object.freeze({
    * draft instead would then be reported as the defect.
    */
   EXECUTION_SHAPE_DIVERGENCE: graded(
-    "WebMCP — webmachinelearning/webmcp#287 (`RegisteredTool.inputSchema` / `executeTool` input / " +
-      "result — string vs object), with #278 and #279",
-    "https://github.com/webmachinelearning/webmcp/issues/287",
-    READ_WEBMCP_EXECUTION,
+    "WebMCP — legacy Chrome string-schema/string-argument observation, superseded by the current object API",
+    "https://webmachinelearning.github.io/webmcp/#dom-modelcontext-executetool",
+    READ_OCTOBER,
     "moderate",
-    "an issue filed on the draft's own tracker — reporting that Chrome's origin-trial " +
-      "implementation returns `inputSchema` as a string, requires a JSON string as the " +
-      "`executeTool` argument, and returns `string | null` — corroborated by one first-hand " +
-      "reproduction in stock Chrome 151.0.7922.138 with no flags, against an origin carrying a " +
-      "trial token, on 2026-09-06: `executeTool(tool, {…})` threw `UnknownError: Failed to parse " +
-      "input arguments` where `executeTool(tool, JSON.stringify({…}))` succeeded. No vendor has " +
-      "published either shape as the contract, so a browser may legitimately accept the other one. " +
-      "Read the shape this run recorded; do not design against this note as though it were a rule",
+    "the Chrome 151 observation from 2026-09-06 remains historical compatibility evidence, not " +
+      "today's contract. The draft now explicitly exposes object schemas and accepts object " +
+      "arguments; only retain a string path for a detected legacy surface. No new browser " +
+      "observation is claimed by this source re-read",
   ),
   /**
    * An empty DevTools WebMCP pane is not evidence of anything.
@@ -1042,9 +1042,10 @@ export const VENDOR = Object.freeze({
    * - **Two auto-mode classifier changes** (v2.1.273, v2.1.278) — see {@link ANTHROPIC_AUTO_MODE}.
    */
   ANTHROPIC_CLAUDE_CODE_CHANGELOG: clause(
-    "Anthropic — Claude Code `CHANGELOG.md`, entries v2.1.271 through v2.1.278",
+    "Anthropic — Claude Code `CHANGELOG.md`, through v2.1.303 (stdio and hosted-connector " +
+      "2026-07-28 probes; re-authentication prompt; missing result fields fixed in v2.1.302)",
     "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
-    READ_VENDOR_GATES,
+    READ_OCTOBER,
   ),
   /** What a tool description is for, and why an error must be actionable to the model. */
   ANTHROPIC_TOOL_DESIGN: clause(
@@ -1127,13 +1128,45 @@ export const VENDOR = Object.freeze({
   /**
    * OpenAI's developer-mode contract, and **the strictest annotation default in this file**:
    * "We respect the `readOnlyHint` tool annotation. Tools without this hint are treated as write
-   * actions." Write actions require confirmation, and approval memory lasts for one conversation —
-   * a refresh prompts again — so there is no durable always-allow to design around.
+   * actions." The custom-server guide describes default write confirmation and conversation-scoped
+   * choices. Persistent app permissions are a separate control; see OPENAI_APP_PERMISSIONS.
    */
   OPENAI_DEVELOPER_MODE: clause(
-    "OpenAI — Developer mode (`readOnlyHint` respected; an unhinted tool is a write action)",
-    "https://developers.openai.com/api/docs/guides/developer-mode",
-    READ_VENDOR_SWEEP,
+    "OpenAI — Add custom MCP server (`readOnlyHint` respected; unhinted tools are writes; " +
+      "write confirmation is the default and approval memory is conversation-scoped)",
+    "https://developers.openai.com/api/docs/guides/custom-mcp-server",
+    READ_OCTOBER,
+  ),
+  OPENAI_PLUGIN_ANNOTATIONS: clause(
+    "OpenAI — Plugin guidelines, Correct annotation (three explicit boolean hints; honest effects; " +
+      "annotations do not grant permission)",
+    "https://developers.openai.com/plugins/plugin-guidelines#correct-annotation",
+    READ_OCTOBER,
+  ),
+  OPENAI_APP_PERMISSIONS: clause(
+    "OpenAI — Admin controls, App action controls (Actions and Permissions are separate; " +
+      "Allow all actions does not override safety protections or authorization)",
+    "https://help.openai.com/en/articles/11509118-admin-controls-security-and-compliance-for-plugins-and-apps#app-action-controls",
+    READ_OCTOBER,
+  ),
+  OPENAI_SCHEDULED_APPROVALS: clause(
+    "OpenAI — Scheduled tasks, How do app permissions work with scheduled tasks? " +
+      "(an action needing approval pauses until reviewed)",
+    "https://help.openai.com/en/articles/10291617-scheduled-tasks-in-chatgpt",
+    READ_OCTOBER,
+  ),
+  OPENAI_SCHEDULED_APPROVAL_PERSISTENCE: graded(
+    "OpenAI — Scheduled tasks (cross-run approval persistence for custom MCP writes in Chat)",
+    "https://help.openai.com/en/articles/10291617-scheduled-tasks-in-chatgpt",
+    READ_OCTOBER,
+    "unverified",
+    "the page documents approval pauses, but does not promise that approving one run authorizes " +
+      "later runs of a custom MCP write in Chat; Work/Codex/API settings do not establish that contract",
+  ),
+  OPENAI_WRITE_SAFETY: clause(
+    "OpenAI — Security and privacy (scope enforcement and human confirmation for irreversible operations)",
+    "https://developers.openai.com/plugins/guides/security-privacy#prompt-injection-and-write-actions",
+    READ_OCTOBER,
   ),
   /**
    * The one documented hard tool cap in this file: "A chat request can have a maximum of 128 tools
@@ -1258,14 +1291,27 @@ export const VENDOR = Object.freeze({
     READ_VENDOR_SWEEP,
   ),
   /**
-   * Codex follows its `approval_policy` and permission profile rather than a classifier over MCP
-   * calls, and from v0.134.0 uses `readOnlyHint` to decide what may execute concurrently.
+   * Codex has per-server and per-tool MCP approval modes and an optional automatic reviewer.
    */
   OPENAI_CODEX_MCP: clause(
-    "OpenAI — Codex configuration (`approval_policy`, permission profiles, and `readOnlyHint` " +
-      "driving concurrent execution from v0.134.0)",
-    "https://learn.chatgpt.com/docs/codex/config",
-    READ_VENDOR_SWEEP,
+    "OpenAI — Configuration Reference (per-server and per-tool MCP approval modes; " +
+      "`approvals_reviewer: auto_review` delegates eligible prompts to a reviewer subagent)",
+    "https://learn.chatgpt.com/docs/config-file/config-reference",
+    READ_OCTOBER,
+  ),
+  GITHUB_COPILOT_RUNTIME_OAUTH: clause(
+    "GitHub — Copilot CLI changelog (CIMD in 1.0.83, scope step-up in 1.0.85, " +
+      "and headless `client_credentials` in 1.0.40)",
+    "https://github.com/github/copilot-cli/blob/main/changelog.md",
+    READ_OCTOBER,
+  ),
+  CODEX_ANNOTATION_HANDLING: graded(
+    "OpenAI — MCP approval-mode configuration (annotation interpretation not established by this table)",
+    "https://learn.chatgpt.com/docs/config-file/config-reference",
+    READ_OCTOBER,
+    "moderate",
+    "the reference establishes configurable MCP approval modes, not how each mode interprets " +
+      "each annotation; do not infer concurrency or a hard block from this table",
   ),
   /**
    * ChatGPT refuses some calls rather than offering them: for write or modify actions it "may ask
@@ -1277,9 +1323,9 @@ export const VENDOR = Object.freeze({
    * advice about owning the confirmation rather than an assertion about any particular tool.
    */
   OPENAI_RISKY_ACTIONS_BLOCKED: graded(
-    "OpenAI — Connector actions (some especially risky actions are blocked rather than prompted)",
-    "https://developers.openai.com/plugins/build/mcp-server",
-    READ_VENDOR_SWEEP,
+    "OpenAI — Custom MCP apps, Security, safety, and data considerations (risky actions may be blocked)",
+    "https://help.openai.com/en/articles/12584461",
+    READ_OCTOBER,
     "moderate",
     "vendor prose naming no threshold and no tool class — it says a block can happen, never when, " +
       "so no server can predict or test which of its tools this reaches",
@@ -1338,18 +1384,16 @@ export const VENDOR = Object.freeze({
    * Codex profile keys reported to **hard-block** rather than prompt: a destructive- or
    * open-world-hinted tool refused outright, with no approval offered.
    *
-   * If it holds, it is the harshest consequence of an honest `destructiveHint` anywhere in this
-   * file — which is exactly why it is not asserted. The confirmed half is separate and STRONG:
-   * `readOnlyHint` drives concurrent execution from v0.134.0.
+   * Re-reading the current configuration reference does not corroborate the report for arbitrary
+   * MCP servers: those keys live under apps. It stays unusable by cite().
    */
   CODEX_PROFILE_HARD_BLOCK: graded(
-    "Codex CLI — reported `destructive_enabled` / `open_world_enabled` profile keys that refuse " +
-      "rather than prompt",
-    "https://learn.chatgpt.com/docs/codex/config",
-    READ_VENDOR_SWEEP,
-    "thin",
-    "a community report of key names that appear in no published configuration reference; the " +
-      "behaviour may not exist, and no server can detect it",
+    "Codex — historical report of annotation-based hard blocks on arbitrary MCP tools",
+    "https://learn.chatgpt.com/docs/config-file/config-reference",
+    READ_OCTOBER,
+    "unverified",
+    "the current reference places destructive/open-world enablement under apps, while generic " +
+      "MCP servers have their own approval modes; app settings do not corroborate this old report",
   ),
   /**
    * Whether Cursor and Grok read a tool's `annotations` at all.

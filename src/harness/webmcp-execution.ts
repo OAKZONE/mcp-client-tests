@@ -7,19 +7,14 @@
  * `getTools()[0].inputSchema` actually *is*, or what `executeTool` will accept — and those two are
  * touched on every single call, by every consumer of the surface.
  *
- * ## Why nothing here decides who is right
+ * ## Current and legacy browser shapes
  *
- * The draft carries both answers already. Its IDL types `RegisteredTool.inputSchema` as `object`;
- * its supporting concepts type a tool definition's input schema as a *string*, and say so for the
- * imperative form outright — "the stringified representation of `inputSchema`". The shipping
- * implementation and the draft then diverge again on the argument to `executeTool`
- * (`webmachinelearning/webmcp#287`, with #278 and #279).
+ * The current draft exposes an optional object schema and takes object arguments. Older Chrome
+ * exposed a stringified schema and accepted JSON strings. The internal string storage described by
+ * supporting concepts is not the public API; the distinction was clarified in September 2026.
  *
- * So this module **classifies and records** rather than asserting an encoding. A page that builds
- * against one reading and tests against a stub of the same reading passes its own suite and fails in
- * every browser that took the other one — which is the exact class of defect this package exists to
- * catch, and it is not caught by pinning a winner. What the suites assert is only what both readings
- * agree on: there is a schema, it describes properties, and *some* argument encoding is accepted.
+ * This module records the browser's shape and normalizes legacy schemas. The suites check that a
+ * provided schema is readable and that a tool executes with the selected argument encoding.
  *
  * ## The round-trip property, which is not WebMCP-specific at all
  *
@@ -105,7 +100,7 @@ export function inputSchemaEncoding(value: unknown): InputSchemaEncoding {
 }
 
 /**
- * A tool's input schema as an object, whichever encoding it arrived in.
+ * A tool's optional input schema as an object, whichever encoding it arrived in.
  *
  * Normalizing here is what lets every assertion downstream be written once instead of twice — and
  * writing it twice is how a suite ends up quietly checking only the encoding its author had in mind.
@@ -122,18 +117,18 @@ export function parseInputSchema(value: unknown): Record<string, unknown> | unde
 }
 
 /**
- * Say what is wrong with a tool's input schema, in terms both readings of the draft agree on.
+ * Say what is wrong with a provided schema, allowing the optional field to be omitted.
  *
- * The encoding is deliberately not a problem — see this module's header. What is a problem is a
- * schema that is absent, unreadable, or that describes no properties while the tool takes
- * arguments: in each case the model is left to guess the argument shape, and it guesses.
+ * Legacy string schemas are normalized. Explicit null, unreadable strings and malformed properties
+ * cannot describe inputs; an omitted schema is allowed by the current draft's dictionary.
  *
  * @param value - The `inputSchema` as `getTools()` returned it.
  * @returns What is wrong with it, or undefined when nothing is.
  */
 export function registeredToolSchemaProblem(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return "publishes a null `inputSchema` instead of an object";
   const encoding = inputSchemaEncoding(value);
-  if (encoding === "absent") return "publishes no `inputSchema`";
   if (encoding === "opaque-string") {
     return "publishes an `inputSchema` string that does not parse as a JSON object";
   }

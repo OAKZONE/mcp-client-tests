@@ -132,8 +132,8 @@ export function readToolAnnotations(tool: unknown): ToolAnnotations | undefined 
  *
  * **Unannotated is not neutral; it is maximally suspicious.** The specification's stated defaults
  * assume an unannotated tool is non-read-only, potentially destructive, non-idempotent and
- * open-world, and shipping clients act on exactly that: one treats it as a write and confirms every
- * call, another withholds auto-permission, and a profile on a third can refuse it with no prompt.
+ * open-world. ChatGPT treats missing readOnlyHint as a write with confirmation by default;
+ * effective app permissions and safety review still determine whether a particular call proceeds.
  *
  * A tool declaring *any* of the four hints has told the gate something, so only a total absence is
  * reported here. Whether the hints are **true** is not knowable from the wire and is never claimed.
@@ -478,15 +478,11 @@ export function rootSchemaCombinatorProblem(schema: unknown): string | undefined
 }
 
 /**
- * How many tools would run without a per-call prompt on a client that honours annotations.
+ * Count declared read-only candidates without a contradictory destructive hint.
  *
- * **This is the figure that moves when the fixes land**, which is why it is computed rather than
- * described. A read-only tool runs unprompted where the hints determine auto-permissions; every
- * other tool — annotated destructive, or not annotated at all — prompts, is refused, or is dropped.
- * A surface where this number is zero is a surface whose users confirm every single call.
- *
- * It is an upper bound, not a promise: a client may still prompt, an organization may still set a
- * tool to `ask`, and a classifier may still veto. Nothing a server publishes can raise it further.
+ * The historical export name is retained for compatibility. This is neither a prediction nor an
+ * upper bound on unprompted execution: a host can prompt for reads and auto-approve some writes.
+ * It does not verify handler behavior or the permissions of an unattended run.
  *
  * @param tools - Every tool as published, in list order.
  * @returns How many declare `readOnlyHint: true` without also declaring themselves destructive.

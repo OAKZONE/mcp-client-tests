@@ -1,0 +1,3 @@
+# Local working notes can contain private toolkit content. The package's files list includes docs,
+# so gitignore alone does not keep this directory out of the npm tarball.
+todo/

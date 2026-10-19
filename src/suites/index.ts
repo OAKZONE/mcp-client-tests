@@ -65,6 +65,7 @@ export {
 export {
   defineProtocolConformanceSuites,
   defineWireConformanceSuite,
+  defineSkillsConformanceSuite,
 } from "./protocol/index.js";
 
 export {

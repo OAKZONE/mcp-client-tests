@@ -7,16 +7,16 @@
  * and a server that cannot offer it is not silently skipped — it is told why, in the terms of the
  * two ways out.
  *
- * One suite today. A second — `subscriptions/listen`, and whether a `list_changed` notification
- * actually reaches a subscriber — belongs here when there is a client contract worth asserting
- * against; it will add a file rather than edit this one.
+ * The wire suite covers core requirements; the Skills suite checks the optional extension only
+ * after the server advertises it. Extension absence never requires a consumer configuration flag.
  */
 
 import type { McpTestTarget } from "../../target.js";
 
 import { defineWireConformanceSuite } from "./wire.js";
+import { defineSkillsConformanceSuite } from "./skills.js";
 
-export { defineWireConformanceSuite };
+export { defineWireConformanceSuite, defineSkillsConformanceSuite };
 
 /**
  * Register every protocol conformance suite this package ships against one target.
@@ -25,4 +25,5 @@ export { defineWireConformanceSuite };
  */
 export function defineProtocolConformanceSuites(target: McpTestTarget): void {
   defineWireConformanceSuite(target);
+  defineSkillsConformanceSuite(target);
 }

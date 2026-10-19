@@ -176,11 +176,11 @@ export const claudeCodeGate: ClientGate = Object.freeze({
   },
 });
 
-/** ChatGPT — the strictest annotation default in the reference. */
+/** Interactive ChatGPT Chat custom MCP/plugin use; scheduled runs have their own row. */
 export const chatgptGate: ClientGate = Object.freeze({
   id: "chatgpt",
-  displayName: "ChatGPT",
-  verifiedAgainst: SWEEP,
+  displayName: "ChatGPT Chat — interactive",
+  verifiedAgainst: "2026-10-19 custom MCP guide, plugin guidelines and Help Center app action controls",
   usesAnnotations: {
     statement:
       "Yes. 'We respect the `readOnlyHint` tool annotation. Tools without this hint are treated " +
@@ -189,8 +189,8 @@ export const chatgptGate: ClientGate = Object.freeze({
   },
   unannotatedConsequence: {
     statement:
-      "is treated as a **write** and confirmed on every call — and because approval memory lasts " +
-      "one conversation and a refresh resets it, that confirmation never stops being asked",
+      "is treated as a write; confirmation is the default, subject to applicable app permissions " +
+      "and safety review — missing readOnlyHint does not imply a prompt on every call",
     source: VENDOR.OPENAI_DEVELOPER_MODE,
   },
   toolCap: {
@@ -199,9 +199,9 @@ export const chatgptGate: ClientGate = Object.freeze({
   },
   approvalDefault: {
     statement:
-      "every write action confirms, showing the JSON payload; a remembered choice applies to that " +
-      "conversation only",
-    source: VENDOR.OPENAI_DEVELOPER_MODE,
+      "app Permissions control prompting separately from enabled Actions; Allow all actions, " +
+      "where available, does not override provider authorization, workspace policy or safety protections",
+    source: VENDOR.OPENAI_APP_PERMISSIONS,
   },
   classifier: {
     statement:
@@ -210,9 +210,44 @@ export const chatgptGate: ClientGate = Object.freeze({
   },
   adminOffSwitch: {
     statement:
-      "workspace connector controls, and Connector Action Constraints an agent's builder sets — a " +
-      "layer above the server that the server cannot see",
+      "workspace app access, role access and enabled Actions; Workspace Agent builder controls " +
+      "belong to a different surface",
+    source: VENDOR.OPENAI_APP_PERMISSIONS,
+  },
+});
+
+/** No promise that an interactive approval carries into a later scheduled Chat run. */
+export const chatgptScheduledChatGate: ClientGate = Object.freeze({
+  id: "chatgpt-scheduled-chat",
+  displayName: "ChatGPT Chat — scheduled tasks",
+  verifiedAgainst: "2026-10-19 scheduled-tasks and app-permissions documentation; no live Chat reproduction",
+  usesAnnotations: {
+    statement:
+      "plugin hints describe effects, not authority; scheduled Chat-specific interpretation " +
+      "and cross-run approval persistence are not established",
+    source: VENDOR.OPENAI_SCHEDULED_APPROVAL_PERSISTENCE,
+  },
+  unannotatedConsequence: {
+    statement:
+      "has no documented scheduled-run exemption; the custom-server guide treats missing " +
+      "readOnlyHint as a write, but exact scheduled approval behavior must be verified in Chat",
+    source: VENDOR.OPENAI_SCHEDULED_APPROVAL_PERSISTENCE,
+  },
+  toolCap: {
+    statement: "not documented for scheduled Chat runs",
+    source: VENDOR.ANNOTATION_HANDLING_UNVERIFIED,
+  },
+  approvalDefault: {
+    statement: "actions needing approval pause the task until reviewed; writes may need approval",
+    source: VENDOR.OPENAI_SCHEDULED_APPROVALS,
+  },
+  classifier: {
+    statement: "safety protections still apply; no published classifier threshold predicts an individual block",
     source: VENDOR.OPENAI_RISKY_ACTIONS_BLOCKED,
+  },
+  adminOffSwitch: {
+    statement: "workspace app availability, persistent permissions and permitted actions",
+    source: VENDOR.OPENAI_SCHEDULED_APPROVALS,
   },
 });
 
@@ -297,29 +332,31 @@ export const cursorGate: ClientGate = Object.freeze({
 export const codexCliGate: ClientGate = Object.freeze({
   id: "codex-cli",
   displayName: "Codex CLI",
-  verifiedAgainst: SWEEP,
+  verifiedAgainst: SWEEP + "; approval configuration re-read 2026-10-19 against the official Configuration Reference",
   usesAnnotations: {
     statement:
-      "`readOnlyHint` drives concurrent execution from v0.134.0; beyond that, routing on the hints " +
-      "is reported rather than documented",
-    source: VENDOR.OPENAI_CODEX_MCP,
+      "annotation handling is not established by the current approval-mode table; MCP approval " +
+      "modes are configurable per server and per tool",
+    source: VENDOR.CODEX_ANNOTATION_HANDLING,
   },
   unannotatedConsequence: {
     statement:
-      "cannot be run concurrently, and is reported to be refusable outright by a permission " +
-      "profile rather than prompted for",
-    source: VENDOR.CODEX_PROFILE_HARD_BLOCK,
+      "depends on the configured MCP approval mode; app-only destructive/open-world blocking " +
+      "settings do not establish a hard block for an arbitrary MCP server",
+    source: VENDOR.OPENAI_CODEX_MCP,
   },
   toolCap: {
     statement: "not documented",
     source: VENDOR.ANNOTATION_HANDLING_UNVERIFIED,
   },
   approvalDefault: {
-    statement: "follows `approval_policy` and the permission profile",
+    statement: "follows approval policy and per-server/per-tool MCP approval modes",
     source: VENDOR.OPENAI_CODEX_MCP,
   },
   classifier: {
-    statement: "sandbox and approval policy rather than a classifier over MCP calls",
+    statement:
+      "eligible approval prompts can be delegated to the reviewer subagent with " +
+      "`approvals_reviewer: auto_review`; already-allowed actions are not re-reviewed",
     source: VENDOR.OPENAI_CODEX_MCP,
   },
   adminOffSwitch: {
@@ -431,6 +468,7 @@ export const copilotCodeReviewGate: ClientGate = Object.freeze({
 export const CLIENT_GATES: readonly ClientGate[] = Object.freeze([
   copilotCodeReviewGate,
   chatgptGate,
+  chatgptScheduledChatGate,
   claudeHostedGate,
   claudeCodeGate,
   vscodeCopilotGate,
@@ -453,7 +491,11 @@ export function unannotatedConsequences(
   gates: readonly ClientGate[] = CLIENT_GATES,
 ): string {
   return gates
-    .map((gate) => `      · ${gate.displayName} — ${gate.unannotatedConsequence.statement}`)
+    .map((gate) => {
+      const { statement, source } = gate.unannotatedConsequence;
+      return `      · ${gate.displayName} [${source.grade.toUpperCase()}] — ${statement}` +
+        (source.caveat ? ` (${source.caveat})` : "");
+    })
     .join("\n");
 }
 

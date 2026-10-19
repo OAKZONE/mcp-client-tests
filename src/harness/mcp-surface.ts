@@ -8,12 +8,9 @@
  * in isolation in `harness.test.ts`, which is what stops this package from reporting its own bugs
  * as somebody else's.
  *
- * **Two of them read tolerantly on purpose.** {@link readCachingHints} and {@link serverIdentity}
- * accept the field at the result's top level or inside its `_meta`, because the revision moved
- * server identity onto `server/discover` plus each result's `_meta` and the distilled sources this
- * package is written from do not fix the placement. Reading both and *reporting which* is how a
- * suite avoids inventing a requirement it cannot cite: a server that carries the fields anywhere a
- * client can find them is not reported as missing them.
+ * The diagnostic readers retain compatibility with older envelopes and report where fields were
+ * found. The conformance validator {@link cachingHintsProblem} checks the result fields required by
+ * the current CacheableResult schema; finding a hint in custom `_meta` is not evidence it conforms.
  */
 
 /** The characters a tool name may use, per the tools contract. */
@@ -135,6 +132,31 @@ export function readCachingHints(result: unknown): CachingHints {
   const nested = meta ? pickHints(meta) : undefined;
   if (nested) return { ...nested, carriedIn: "_meta" };
   return { carriedIn: "absent" };
+}
+
+/**
+ * Validate freshness hints without applying the complete-result contract to MRTR intermediates.
+ *
+ * Older results without `resultType` are treated as complete for compatibility. The wire suite
+ * separately requires that field on the current revision. Extension-defined result types are not
+ * judged by the core's caching contract.
+ *
+ * @param result - A result of an operation the caching specification names.
+ * @returns The defect, or undefined for valid hints or a non-complete result.
+ */
+export function cachingHintsProblem(result: unknown): string | undefined {
+  const record = asRecord(result);
+  const type = record?.resultType;
+  if (type !== undefined && type !== "complete") return undefined;
+  // The published CacheableResult schema settles placement: hints are result fields, not _meta.
+  const ttlMs = record?.ttlMs;
+  if (typeof ttlMs !== "number" || !Number.isInteger(ttlMs) || ttlMs < 0) {
+    return "`ttlMs` must be a non-negative integer";
+  }
+  if (record?.cacheScope !== "public" && record?.cacheScope !== "private") {
+    return '`cacheScope` must be "public" or "private"';
+  }
+  return undefined;
 }
 
 /** A server's own identity, as published, and where it was found. */

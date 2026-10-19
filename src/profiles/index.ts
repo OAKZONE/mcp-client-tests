@@ -44,6 +44,7 @@ export {
 export {
   CLIENT_GATES,
   chatgptGate,
+  chatgptScheduledChatGate,
   claudeCodeGate,
   claudeHostedGate,
   codexCliGate,

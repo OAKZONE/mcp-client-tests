@@ -6,21 +6,12 @@
  * accepts, and neither can tell whether a value a tool prints is a value it would take back. Those
  * three are what a real caller meets on every single call, and they are where the defects are.
  *
- * ## Why this suite reports the encodings instead of requiring one
+ * ## The browser contract
  *
- * The draft carries both answers itself: its IDL types `RegisteredTool.inputSchema` as `object`,
- * while its supporting concepts type a tool definition's input schema as a string — "the stringified
- * representation" for imperatively registered tools. The shipping implementation and the draft then
- * diverge again on the `executeTool` argument, which is filed on the draft's own tracker
- * (`webmachinelearning/webmcp#287`, with #278 and #279) and reproduced first-hand in stock Chrome
- * 151.0.7922.138: `executeTool(tool, {…})` threw `UnknownError: Failed to parse input arguments`
- * where the JSON-string form succeeded.
- *
- * Requiring either encoding would fail correct pages on some browser, so this suite **records which
- * one this browser used** and asserts only what both readings agree on: a tool publishes a readable
- * schema, and some published encoding is accepted. The per-browser record is the deliverable — a
- * page that builds against the draft and tests against an object-shaped stub passes its own suite
- * and fails in front of every user.
+ * The current draft exposes an optional object schema and accepts object arguments. Older Chrome
+ * exposed string schemas and required JSON-string arguments. The runner feature-detects that legacy
+ * surface and calls each declared tool once. A handler failure never triggers an encoding retry.
+ * Missing schemas are allowed; provided schemas must be readable.
  *
  * ## The round-trip property, which is not about WebMCP at all
  *
@@ -138,7 +129,7 @@ export function defineWebMcpExecutionSuite(
       assertWebMcpApiPresent(readings);
     });
 
-    it("publishes a readable input schema for every registered tool", () => {
+    it("publishes a readable input schema whenever one is provided", () => {
       const problems = readings.flatMap((reading) =>
         reading.tools
           .map((tool) => {
@@ -152,12 +143,9 @@ export function defineWebMcpExecutionSuite(
         problems,
         cite(
           WEBMCP.INPUT_SCHEMA_SHAPE,
-          "A registered tool publishes an input schema, and both readings of the draft agree it " +
-            "is a JSON Schema — the IDL types it as an object, the supporting concepts as that " +
-            "object stringified. Whichever encoding your browser hands back, it has to parse: a " +
-            "schema that is absent, unreadable, or not describing an object leaves the model to " +
-            "guess the argument shape, and it guesses. The encoding itself is not asserted here " +
-            "and is recorded in the advisories instead.",
+          "The current draft makes inputSchema optional and exposes it as an object. An omitted " +
+            "schema is conforming. A provided schema must be readable; older Chrome's string " +
+            "encoding is normalized for compatibility and recorded in the advisories.",
         ),
       ).toEqual([]);
     });
@@ -193,7 +181,7 @@ export function defineWebMcpExecutionSuite(
       ).toEqual([]);
     });
 
-    it("accepts one of the published argument encodings for every callable tool", () => {
+    it("executes each callable tool using the browser's argument encoding", () => {
       const unreachable = executed
         .filter((entry) => entry.reading.registered)
         .map((entry) => {
@@ -210,10 +198,9 @@ export function defineWebMcpExecutionSuite(
         cite(
           WEBMCP.EXECUTE_TOOL,
           "`executeTool(tool, inputObject)` is how an attached agent calls a registered tool. " +
-            "This run attempted both published spellings of the argument — the object the draft's " +
-            "IDL types, and the JSON string the shipping implementation is reported to require — " +
-            "and neither was accepted, so the tool is registered and uncallable. Which spelling " +
-            "works is not asserted; that a registered tool can be called at all is.\n" +
+            "This run selected object arguments for the current API or JSON-string arguments " +
+            "for a legacy string-schema surface. The call was rejected. It is not retried under " +
+            "another encoding: a handler error must not cause duplicate execution.\n" +
             "  If your handler rejected the arguments rather than the browser rejecting their " +
             "encoding, the `arguments` in `webMcp.toolCalls` are the thing to fix — the error " +
             "text above says which happened.",
@@ -296,14 +283,10 @@ function collectAdvisories(
       subject: "the `inputSchema` encoding this browser returned",
       finding: `\`getTools()\` returned \`inputSchema\` as ${summary}`,
       consequence:
-        "This is the per-browser half of the record, and it is not a defect either way: the draft " +
-        "types `inputSchema` as an object in its IDL and as a stringified schema in its " +
-        "supporting concepts, so both are grounded. What breaks is a page written against one " +
-        "and tested against a stub of the same one — green in its own suite, broken in the " +
-        "browser. Read whichever encoding your library hands you, rather than the one you expect: " +
-        "`typeof schema === \"string\" ? JSON.parse(schema) : schema` costs nothing and survives " +
-        "either resolution.",
-      source: WEBMCP.EXECUTION_SHAPE_DIVERGENCE,
+        "The current draft exposes an optional object schema. String schemas identify the older " +
+        "Chrome API, not an alternative reading of today's specification. Normalize legacy " +
+        "strings when supporting those browsers, and pass objects to the current executeTool API.",
+      source: WEBMCP.INPUT_SCHEMA_SHAPE,
     });
   }
 
@@ -340,13 +323,10 @@ function collectAdvisories(
         `arguments were accepted as ${[...accepted].join(" and ")}` +
         (resultTypes.size > 0 ? `, and results came back as ${[...resultTypes].join(", ")}` : ""),
       consequence:
-        "The other half of the per-browser record. The draft types the argument as an `object` " +
-        "and the result as a `DOMString`; the shipping implementation is reported to require a " +
-        "JSON string in and to return `string | null` out. If only one encoding is listed above, " +
-        "a library that sends the other one is broken on this browser and its own tests will not " +
-        "say so — send what this run recorded, and parse the result rather than assuming its " +
-        "shape.",
-      source: WEBMCP.EXECUTION_SHAPE_DIVERGENCE,
+        "The current draft takes object arguments and resolves to a stringified result. This run " +
+        "calls each declared tool once, selecting a JSON string only for a legacy string-schema " +
+        "surface. It does not probe every accepted encoding or retry a rejected handler.",
+      source: WEBMCP.EXECUTE_TOOL,
     });
   }
 

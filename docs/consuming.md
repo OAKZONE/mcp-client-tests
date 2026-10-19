@@ -166,6 +166,20 @@ needs. If it refuses, it obtains one by driving a real authorization through the
 capability — so a gated server needs that block declared, and one without it stops the run with the
 two ways out named rather than passing while looking at a `401`.
 
+The protocol family also registers `defineSkillsConformanceSuite`. It reads `server/discover` first
+and skips its assertions when `io.modelcontextprotocol/skills` is absent. An advertised extension
+must declare Resources and implement `skills/list` and `skills/get`; complete manifests need
+`resultType: "complete"`, non-negative integer `ttlMs`, and public/private `cacheScope`. The suite
+pages through the listing and reads each listed skill's manifest. It checks required frontmatter,
+explicit file manifests or `"dynamic"`, SHA-256 digest syntax, byte sizes, duplicate file URIs, and
+the skill's own `SKILL.md` entry. It does not load instructions into a model or execute served code.
+Alternative URI schemes and duplicate **skill names** are allowed; the recommended size limits are
+not asserted. Content bytes and YAML frontmatter equality are not verified by these metadata checks.
+
+Core results now require a non-empty `resultType`, including list results. Caching checks apply to
+complete results; `input_required` intermediates and extension-specific result types are not judged
+by the core caching contract. Negotiated extensions can add result types.
+
 This family also prints **advisories** after its results: things the specification offers that your
 server does not publish — `instructions`, `icons[]`, tool descriptions, an `outputSchema`, a
 `listChanged` declaration — each with what it costs and the clause that offers it. **Advisories never
@@ -204,7 +218,7 @@ endpoint.
 
 - a tool publishing **no behavioural hint at all**. Unannotated is not neutral: the specification's
   stated default is non-read-only, potentially destructive, non-idempotent and open-world, and the
-  clients act on exactly that — ChatGPT treats it as a **write** and confirms every call, Claude
+  clients act on that — ChatGPT treats it as a **write** with confirmation by default, Claude
   withholds auto-permission, and a Codex profile is reported to refuse it with no prompt;
 - a tool with no `title` — the name a human is actually asked to approve;
 - a tool claiming `readOnlyHint` and `destructiveHint` at once;
@@ -219,9 +233,15 @@ endpoint.
   comment, or an instruction to ignore what was said elsewhere.
 
 **What it advises on** — the caps (one documented, two contested, four unknown), how many of your
-tools would run unprompted, hints declared only in part, descriptions that merely *read* as
+tools declare read-only behavior (not a guarantee of unprompted execution), hints declared only in part, descriptions that merely *read* as
 instructions, schemas that branch at the root, destructive tools and the surfaces where nothing will
 ask, and the gates configured on the client that you can neither see nor fix.
+
+For ChatGPT plugins, this also reports missing explicit annotation booleans, writes that may pause
+scheduled Chat runs, destructive-action safeguards, and description wording that claims approval.
+See [ChatGPT scheduled writes](chatgpt-scheduled-writes.md) for the source-backed diagnosis and
+reproduction procedure. Allow all actions does not bypass safety protections; passing this suite
+cannot certify unattended execution in ChatGPT.
 
 **Advice is graded, and the grade decides what can fail you.** Every clause carries how well
 established it is — `STRONG` for a primary source read directly, down through `MODERATE` and `THIN`
@@ -551,20 +571,12 @@ import { target } from "./target";
 defineWebMcpExecutionSuite(target);
 ```
 
-**It reports the shapes rather than requiring them, and that is the deliverable.** The draft carries
-both answers itself: its IDL types `RegisteredTool.inputSchema` as an `object`, its supporting
-concepts as that object stringified. The shipping implementation and the draft diverge again on the
-`executeTool` argument — filed on the draft's own tracker as `webmachinelearning/webmcp#287`, with
-#278 and #279, and reproduced first-hand in stock Chrome 151.0.7922.138 with no flags:
-`executeTool(tool, {…})` threw `UnknownError: Failed to parse input arguments` where
-`executeTool(tool, JSON.stringify({…}))` succeeded.
-
-So the advisories say *this browser returned `inputSchema` as X and accepted arguments as Y*, and the
-assertions cover only what both readings agree on: a tool publishes a schema that parses, and some
-published encoding is accepted. A page built against one reading and tested against a stub of the
-same reading passes its own suite and fails in front of every user — the exact class of defect no
-amount of unit testing reaches. Read whichever encoding you are handed
-(`typeof schema === "string" ? JSON.parse(schema) : schema`) and you survive either resolution.
+**The current draft uses objects.** `RegisteredTool.inputSchema` is optional and object-shaped,
+and `executeTool` takes a JavaScript object. Older Chrome exposed string schemas and required JSON
+strings. The suite feature-detects that legacy surface and calls each declared tool once, selecting
+the encoding from the returned schema shape. It never retries a handler error with another encoding.
+Omitted schemas are allowed; malformed provided schemas fail. Advisories record the shape seen and
+whether parameter round-trip checking had enough schema information to run.
 
 **It also checks the round trip, which is not a WebMCP property at all.** Every value a tool's result
 reports for a parameter must be a value that parameter accepts. A surface can print a filter as `on`,

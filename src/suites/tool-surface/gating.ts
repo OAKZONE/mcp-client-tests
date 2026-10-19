@@ -42,6 +42,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { advise, reportAdvisories } from "../../harness/advisory.js";
+import { chatgptGateAdvisories } from "../../harness/chatgpt-gating.js";
 import { MCP, VENDOR, cite } from "../../harness/specifications.js";
 import {
   annotationProblem,
@@ -130,20 +131,17 @@ export function defineToolGatingSuite(mcpTarget: McpTestTarget): void {
      * spending a day on an endpoint that was never the problem.
      */
     function collectGateAdvisories(): void {
+      for (const advisory of chatgptGateAdvisories(tools)) advise(SCOPE, advisory);
       const unprompted = unpromptedToolCount(tools);
       advise(SCOPE, {
-        subject: "auto-permission",
+        subject: "declared read-only candidates",
         finding:
-          `${unprompted} of ${tools.length} tools would run without a per-call prompt on a ` +
-          "client that honours annotations" +
-          (unprompted === 0
-            ? " — every call this server serves is confirmed by hand, on every surface that asks"
-            : ""),
+          `${unprompted} of ${tools.length} tools declare read-only behavior without a ` +
+          "destructive hint; this is not a count of tools guaranteed to run unprompted",
         consequence:
-          "This is the number that moves when the annotations land. A tool declaring " +
-          "`readOnlyHint: true` can run unattended where the hints determine auto-permissions; " +
-          "every other tool prompts, and on one client the approval is forgotten again at the " +
-          "next refresh.",
+          "Annotations inform clients but grant no authority. A client may ask even for reads, " +
+          "or allow some writes under its own policy. Verify each intended client and scheduled " +
+          "surface; this catalog cannot establish effective permissions or handler purity.",
         source: MCP.TOOL_ANNOTATIONS,
       });
 
@@ -168,10 +166,10 @@ export function defineToolGatingSuite(mcpTarget: McpTestTarget): void {
           subject: "partly declared hints",
           finding: `${partial.length} tools declare some hints and not others:\n      ${partial.join("\n      ")}`,
           consequence:
-            "An undeclared hint takes the specification's default rather than nothing: absent " +
-            "`idempotentHint` denies a client the retry it would otherwise have made silently, " +
-            "and absent `openWorldHint` leaves a closed-domain tool judged as though it reached " +
-            "the open internet.",
+            "An undeclared hint takes the specification's conservative default: absent " +
+            "`idempotentHint` does not declare retry safety, and absent `openWorldHint` leaves " +
+            "a closed-domain tool described as open-world. Neither hint promises a particular " +
+            "client's retry or approval behavior.",
           source: MCP.TOOL_ANNOTATION_DEFAULTS,
         });
       }
@@ -245,8 +243,9 @@ export function defineToolGatingSuite(mcpTarget: McpTestTarget): void {
             "— an API-side connector, a scheduled runner, a blanket auto-approve mode — and it " +
             "fires or blocks when you did not want it. Assume each of these runs unattended at " +
             "least once, and make sure the worst such call is one you would have approved: a " +
-            "dry-run default, a `plan` → `apply` handle, or an idempotency key that makes the " +
-            "duplicate a no-op.",
+            "preview plus an authorized `plan` → `apply` step where required. An idempotency " +
+            "key prevents duplicate effects; it does not authorize the first execution or " +
+            "replace human confirmation.",
           source: VENDOR.ANTHROPIC_MESSAGES_CONNECTOR,
           relation: "reports",
         });
